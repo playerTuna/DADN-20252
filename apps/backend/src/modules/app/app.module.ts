@@ -12,7 +12,7 @@ import { CommandModule } from "../command/command.module";
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: [join(__dirname, "../../../../../.env")],
+      envFilePath: [".env", "apps/backend/.env"],
     }),
     MongooseModule.forRootAsync({
       inject: [ConfigService],

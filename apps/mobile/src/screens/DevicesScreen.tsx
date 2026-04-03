@@ -110,10 +110,10 @@ export default function DevicesScreen() {
     <View style={styles.tableRow}>
       <Text style={[styles.cell, { flex: 0.8 }]}>{item.id}</Text>
       <Text style={[styles.cell, { flex: 2 }]}>{item.name}</Text>
-      <View style={[styles.cell, { flex: 1, alignItems: 'center' }]}>
+      <View style={{ flex: 1, alignItems: 'center' }}>
         <CustomSwitch value={item.autoMode} onValueChange={() => toggleAutoMode(item.id)} />
       </View>
-      <View style={[styles.cell, { flex: 1, alignItems: 'center' }]}>
+      <View style={{ flex: 1, alignItems: 'center' }}>
         <CustomSwitch value={item.power} onValueChange={() => togglePower(item.id, item.power)} />
       </View>
     </View>
