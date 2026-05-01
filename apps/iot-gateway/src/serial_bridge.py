@@ -39,6 +39,7 @@ class SerialBridge:
 
     def start(self) -> None:
         self._ser = serial.Serial(self._port, self._baud, timeout=1)
+        logger.info(f"Opened serial port {self._port} at {self._baud} baud.")
         self._rx_thread = threading.Thread(target=self._rx_loop, name="serial-rx", daemon=True)
         self._rx_thread.start()
 
@@ -49,6 +50,7 @@ class SerialBridge:
         if self._ser:
             try:
                 self._ser.close()
+                logger.info(f"Closed serial port {self._port}.")
             except Exception:
                 pass
 
@@ -60,6 +62,7 @@ class SerialBridge:
             return
         data = (line.rstrip("\n") + "\n").encode("utf-8")
         self._ser.write(data)
+        logger.info(f"Sent serial command: {line.split(':', 1)[0]}")
 
     def _rx_loop(self) -> None:
         assert self._ser is not None

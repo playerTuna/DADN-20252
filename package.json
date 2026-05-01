@@ -7,6 +7,8 @@
     "packages/*"
   ],
   "scripts": {
+    "dev:frontend": "npm --workspace smart-home run start",
+    "web:frontend": "npm --workspace smart-home run web",
     "dev:backend": "npm --workspace @yolo-farm/backend run start:dev",
     "build:backend": "npm --workspace @yolo-farm/backend run build",
     "start:backend": "npm --workspace @yolo-farm/backend run start:prod"

@@ -1,6 +1,7 @@
-import { Feather } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Feather, Ionicons } from '@expo/vector-icons';
+
+import { useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Modal,
   Platform,
@@ -9,36 +10,44 @@ import {
   Text,
   View,
   type View as RNView,
-} from "react-native";
+} from 'react-native';
 import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
-} from "react-native-reanimated";
-import { logout } from "../services/auth";
+} from 'react-native-reanimated';
+import { logout } from '../services/auth';
 
-const ANIM_MS = 240;
-const MENU_GAP = 8;
-const ITEM_H = 44;
-const MENU_PAD_V = 8;
-const MENU_MIN_W = 152;
+const ANIM_MS = 180;
+const MENU_GAP = 10;
+const MENU_WIDTH = 220;
 
-type Anchor = { x: number; y: number; w: number; h: number };
+type Anchor = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
 
 type UserMenuProps = {
   userName: string;
+  userEmail?: string;
 };
 
-export function UserMenu({ userName }: UserMenuProps) {
+function getInitial(name?: string, email?: string) {
+  const source = (name || email || 'U').trim();
+  return source.charAt(0).toUpperCase();
+}
+
+export function UserMenu({ userName, userEmail }: UserMenuProps) {
   const router = useRouter();
+  const triggerRef = useRef<RNView>(null);
+
   const [isOpen, setIsOpen] = useState(false);
   const [anchor, setAnchor] = useState<Anchor | null>(null);
-  const triggerRef = useRef<RNView>(null);
-  const progress = useSharedValue(0);
 
-  const itemCount = 3;
-  const menuHeight = MENU_PAD_V * 2 + ITEM_H * itemCount;
+  const progress = useSharedValue(0);
 
   const finishClose = useCallback(() => {
     setIsOpen(false);
@@ -58,40 +67,48 @@ export function UserMenu({ userName }: UserMenuProps) {
     });
   }, []);
 
+  const toggle = () => {
+    if (isOpen) {
+      closeMenu();
+      return;
+    }
+
+    openMenu();
+  };
+
   useEffect(() => {
     if (!isOpen || !anchor) return;
+
     progress.value = 0;
     progress.value = withTiming(1, { duration: ANIM_MS });
   }, [isOpen, anchor, progress]);
 
   useEffect(() => {
-    if (Platform.OS !== "web" || !isOpen) return;
-    const onKeyDown = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape") closeMenu();
-    };
-    globalThis.addEventListener?.("keydown", onKeyDown);
-    return () => globalThis.removeEventListener?.("keydown", onKeyDown);
-  }, [isOpen, closeMenu]);
+    if (Platform.OS !== 'web' || !isOpen) return;
 
-  const toggle = () => {
-    if (isOpen) {
-      closeMenu();
-    } else {
-      openMenu();
-    }
-  };
+    const onKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') closeMenu();
+    };
+
+    globalThis.addEventListener?.('keydown', onKeyDown);
+    return () => globalThis.removeEventListener?.('keydown', onKeyDown);
+  }, [isOpen, closeMenu]);
 
   const menuAnimatedStyle = useAnimatedStyle(() => ({
     opacity: progress.value,
-    transform: [{ translateY: (1 - progress.value) * 10 }],
+    transform: [{ translateY: (1 - progress.value) * 8 }],
   }));
 
-  const menuTop = anchor ? anchor.y - menuHeight - MENU_GAP : 0;
-  const menuLeft = anchor?.x ?? 0;
-  const menuWidth = anchor ? Math.max(anchor.w, MENU_MIN_W) : MENU_MIN_W;
+  const menuLeft = anchor ? Math.max(12, anchor.x) : 12;
+  const menuTop = anchor ? Math.max(12, anchor.y - 176 - MENU_GAP) : 12;
 
-  const goProfileOrSettings = () => {
-    console.log("go to profile/settings");
+  const goProfile = () => {
+    router.push('/profile' as never);
+    closeMenu();
+  };
+
+  const goSettings = () => {
+    router.push('/settings' as never);
     closeMenu();
   };
 
@@ -99,9 +116,9 @@ export function UserMenu({ userName }: UserMenuProps) {
     try {
       await logout();
     } catch {
-      // Swallow error to avoid trapping user in authenticated area.
+      // Avoid trapping user if logout storage cleanup fails.
     } finally {
-      router.replace("/");
+      router.replace('/');
       closeMenu();
     }
   };
@@ -111,77 +128,97 @@ export function UserMenu({ userName }: UserMenuProps) {
       <Modal visible={isOpen} transparent animationType="none" onRequestClose={closeMenu}>
         <View style={styles.modalRoot}>
           <Pressable
-            accessibilityLabel="Close menu"
+            accessibilityLabel="Close user menu"
             onPress={closeMenu}
             style={styles.backdrop}
           />
+
           {anchor ? (
             <Animated.View
-              pointerEvents="box-none"
               style={[
+                styles.menu,
                 menuAnimatedStyle,
                 {
-                  position: "absolute",
                   left: menuLeft,
                   top: menuTop,
-                  width: menuWidth,
-                  zIndex: 10,
-                  elevation: 12,
-                  shadowColor: "#000000",
-                  shadowOffset: { width: 0, height: 4 },
-                  shadowOpacity: 0.12,
-                  shadowRadius: 12,
                 },
               ]}
-              className="rounded-xl bg-white py-2"
             >
-              <Pressable
-                onPress={goProfileOrSettings}
-                className="mx-1 flex-row items-center gap-3 rounded-lg px-3 py-2.5 active:bg-[rgba(34,255,102,0.12)] web:cursor-pointer web:hover:bg-[rgba(34,255,102,0.12)]"
-              >
-                <Feather name="user" size={18} color="#111111" />
-                <Text className="text-[14px] font-semibold text-neutral-900">Profile</Text>
+              <Pressable style={styles.menuItem} onPress={goProfile}>
+                <View style={styles.menuIcon}>
+                  <Feather name="user" size={17} color="#0f172a" />
+                </View>
+
+                <View style={styles.menuTextWrap}>
+                  <Text style={styles.menuTitle} numberOfLines={1}>
+                    Profile
+                  </Text>
+                  {userEmail ? (
+                    <Text style={styles.menuSubtitle} numberOfLines={1}>
+                      {userEmail}
+                    </Text>
+                  ) : null}
+                </View>
               </Pressable>
-              <Pressable
-                onPress={goProfileOrSettings}
-                className="mx-1 flex-row items-center gap-3 rounded-lg px-3 py-2.5 active:bg-[rgba(34,255,102,0.12)] web:cursor-pointer web:hover:bg-[rgba(34,255,102,0.12)]"
-              >
-                <Feather name="settings" size={18} color="#111111" />
-                <Text className="text-[14px] font-semibold text-neutral-900">Settings</Text>
+
+              <Pressable style={styles.menuItem} onPress={goSettings}>
+                <View style={styles.menuIcon}>
+                  <Feather name="settings" size={17} color="#0f172a" />
+                </View>
+
+                <Text style={styles.menuTitle} numberOfLines={1}>
+                  Settings
+                </Text>
               </Pressable>
-              <Pressable
-                onPress={goLogout}
-                className="mx-1 flex-row items-center gap-3 rounded-lg px-3 py-2.5 active:bg-red-50 web:cursor-pointer web:hover:bg-red-50"
-              >
-                <Feather name="log-out" size={18} color="#b91c1c" />
-                <Text className="text-[14px] font-semibold text-red-700">Logout</Text>
+
+              <View style={styles.menuDivider} />
+
+              <Pressable style={[styles.menuItem, styles.logoutItem]} onPress={goLogout}>
+                <View style={[styles.menuIcon, styles.logoutIcon]}>
+                  <Feather name="log-out" size={17} color="#dc2626" />
+                </View>
+
+                <Text style={styles.logoutText} numberOfLines={1}>
+                  Logout
+                </Text>
               </Pressable>
             </Animated.View>
           ) : null}
         </View>
       </Modal>
 
-      <View ref={triggerRef} collapsable={false} className="w-full">
+      <View ref={triggerRef} collapsable={false} style={styles.triggerWrap}>
         <Pressable
           onPress={toggle}
           accessibilityRole="button"
           accessibilityState={{ expanded: isOpen }}
           accessibilityLabel="User menu"
-          className={`h-[54px] w-full flex-row items-center gap-2 border-t border-[#d5d5d5] px-2 web:cursor-pointer ${
-            isOpen ? "bg-[rgba(34,255,102,0.14)]" : "bg-transparent"
-          }`}
+          style={({ pressed }) => [
+            styles.trigger,
+            isOpen && styles.triggerOpen,
+            pressed && styles.triggerPressed,
+          ]}
         >
-          <View className="h-9 w-9 items-center justify-center rounded-full bg-[#ececec]">
-            <Feather name="user" size={18} color="#888888" />
+          <View style={styles.avatar}>
+            <Ionicons name="person-circle" size={34} color="#94a3b8" />
           </View>
-          <Text className="flex-1 text-left text-[14px] text-neutral-900" numberOfLines={1}>
-            {userName}
-          </Text>
-          <Feather
-            name={isOpen ? "chevron-down" : "chevron-up"}
-            size={18}
-            color="#111111"
-          />
+
+          <View style={styles.identity}>
+            <Text style={styles.userName} numberOfLines={1}>
+              {userName || 'User'}
+            </Text>
+            {userEmail ? (
+              <Text style={styles.userEmail} numberOfLines={1}>
+                {userEmail}
+              </Text>
+            ) : (
+              <Text style={styles.userEmail} numberOfLines={1}>
+                Smart Farm account
+              </Text>
+            )}
+          </View>
+
+          <Feather name={isOpen ? 'chevron-down' : 'chevron-up'} size={17} color="#64748b" />
         </Pressable>
       </View>
     </>
@@ -192,8 +229,149 @@ const styles = StyleSheet.create({
   modalRoot: {
     flex: 1,
   },
+
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.2)",
+    backgroundColor: 'rgba(15, 23, 42, 0.16)',
+  },
+
+  menu: {
+    position: 'absolute',
+    width: MENU_WIDTH,
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+    borderRadius: 16,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.14,
+    shadowRadius: 24,
+    elevation: 14,
+  },
+
+  menuItem: {
+    minHeight: 44,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+
+  menuIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f1f5f9',
+    flexShrink: 0,
+  },
+
+  menuTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+
+  menuTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0f172a',
+  },
+
+  menuSubtitle: {
+    marginTop: 2,
+    fontSize: 12,
+    color: '#64748b',
+  },
+
+  menuDivider: {
+    height: 1,
+    marginVertical: 6,
+    marginHorizontal: 8,
+    backgroundColor: '#e5e7eb',
+  },
+
+  logoutItem: {
+    backgroundColor: '#fff7f7',
+  },
+
+  logoutIcon: {
+    backgroundColor: '#fee2e2',
+  },
+
+  logoutText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#dc2626',
+  },
+
+  triggerWrap: {
+    width: '100%',
+    paddingHorizontal: 10,
+    paddingTop: 12,
+    paddingBottom: 14,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
+    backgroundColor: '#ffffff',
+  },
+
+  trigger: {
+    width: '100%',
+    minHeight: 58,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    borderRadius: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+
+  triggerOpen: {
+    borderColor: '#22c55e',
+    backgroundColor: '#ecfdf5',
+  },
+
+  triggerPressed: {
+    opacity: 0.86,
+  },
+
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f1f5f9',
+    flexShrink: 0,
+  },
+
+  avatarText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#ffffff',
+  },
+
+  identity: {
+    flex: 1,
+    minWidth: 0,
+  },
+
+  userName: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#0f172a',
+  },
+
+  userEmail: {
+    marginTop: 2,
+    fontSize: 11,
+    color: '#64748b',
   },
 });
