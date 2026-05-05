@@ -38,10 +38,10 @@ const QUICK_STAT_SENSOR_LABEL: Record<TelemetryType, string> = {
 };
 
 const QUICK_STAT_ICON: Record<TelemetryType, StatItem['icon']> = {
-  temp: 'thermometer-outline',
-  air_humidity: 'cloud-outline',
-  soil_humidity: 'water-outline',
-  light: 'sunny-outline',
+  temp: 'thermometer',
+  air_humidity: 'cloud',
+  soil_humidity: 'drop',
+  light: 'sun',
 };
 
 export type TelemetryPoint = {
@@ -80,28 +80,6 @@ export type AutomationRule = {
   turnOffWhen: AutomationThreshold;
   onPayload?: string;
   offPayload?: string;
-};
-
-export type AutomationLog = {
-  id?: string;
-  _id?: string;
-  deviceId: string;
-  target: 'pump' | 'fan' | 'rgb';
-  sensorKey: AutomationSensorKey;
-  sensorValue?: number;
-  action?: 'ON' | 'OFF';
-  payload?: string;
-  reason?: string;
-  status?: 'sent' | 'failed' | 'acked' | 'timeout';
-  createdAt?: string;
-  commandId?: string;
-  error?: string;
-};
-
-export type AppFeatures = {
-  analyticsBeta: boolean;
-  deviceSchedules: boolean;
-  alertPush: boolean;
 };
 
 function buildUrl(path: string, query?: Record<string, string | undefined>) {
@@ -201,7 +179,7 @@ async function getLatestTelemetry(type: TelemetryType): Promise<LatestTelemetry 
 
 function formatQuickStatValue(type: TelemetryType, doc: LatestTelemetry | null): string {
   if (!doc || typeof doc.numericValue !== 'number' || !Number.isFinite(doc.numericValue)) {
-    return '—';
+    return '-';
   }
   const n = Math.round(doc.numericValue);
   if (type === 'temp') return String(n);
@@ -216,16 +194,6 @@ export async function getUser(): Promise<UserProfile> {
   return apiGet<UserProfile>('/me');
 }
 
-export async function updateUserProfile(
-  payload: Pick<UserProfile, 'displayName'>
-): Promise<UserProfile> {
-  return apiPatch<UserProfile>('/me', payload);
-}
-
-export async function getFeatures(): Promise<AppFeatures> {
-  return apiGet<AppFeatures>('/features');
-}
-
 export async function getSettings(): Promise<DeviceSettings> {
   return apiGet<DeviceSettings>('/settings');
 }
@@ -234,11 +202,6 @@ export async function updateUserSettings(
   payload: Partial<EditableSettings>
 ): Promise<EditableSettings> {
   return apiPatch<EditableSettings>('/settings', sanitizeSettingsPatch(payload));
-}
-
-export async function updateSetting(key: string, value: boolean): Promise<boolean> {
-  await updateUserSettings({ [key]: value });
-  return value;
 }
 
 export async function getManagedDevices(): Promise<ManagedDevice[]> {
@@ -273,10 +236,6 @@ export async function updateAutomationRule(
   return apiPatch<AutomationRule[]>(`/automation/rules/${deviceId}`, payload);
 }
 
-export async function getAutomationLogs(): Promise<AutomationLog[]> {
-  return apiGet<AutomationLog[]>('/automation/logs');
-}
-
 export async function getTelemetryHistory(
   type?: TelemetryType,
   from?: string,
@@ -302,9 +261,6 @@ export async function getTelemetryHistory(
       receivedAt: row.receivedAt,
     }));
 }
-
-/** Alias để analytics cũ vẫn chạy nếu còn import tên cũ */
-export const getTelemetrySeries = getTelemetryHistory;
 
 export async function getQuickStatsLive(): Promise<StatItem[]> {
   const sensorTypes: TelemetryType[] = ['temp', 'air_humidity', 'soil_humidity', 'light'];

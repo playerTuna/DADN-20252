@@ -1,14 +1,13 @@
-import { sidebarItems } from '../constants/navigation';
-import { Feather, Ionicons } from '@expo/vector-icons';
+import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
+import { MobileHeaderMenu } from '@/components/MobileHeaderMenu';
 import {
   ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View,
@@ -16,47 +15,79 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { Toggle } from '../components/Toggle';
 import { UserMenu } from '../components/UserMenu';
+import { sidebarItems } from '../constants/navigation';
 import {
-  getAutomationLogs,
-  getAutomationRules,
-  getManagedDevices,
   getDashboard,
+  getManagedDevices,
   getUser,
   toggleManagedDeviceAutoMode,
-  type AutomationLog,
-  type AutomationRule,
-  type ManagedDevice,
   updateManagedDevicePower,
+  type ManagedDevice,
 } from '../services/api';
-import { getTokens } from '../services/auth';
+import { clearTokens, getTokens } from '../services/auth';
 import type { NavKey } from '../types/dashboard';
-
-const ACCENT_GREEN = '#22ff66';
+import { BottomNav } from '../components/BottomNav';
 const PAGE_BG = '#e5e5e5';
+const PANEL_BG = '#ffffff';
+const PANEL_BORDER = '#d2d2d2';
+const ACCENT = '#160f9b';
+const ACCENT_GREEN = '#28f464';
+const TEXT_PRIMARY = '#050505';
+const TEXT_SECONDARY = '#555555';
+const ERROR_BG = '#ffe4e6';
+const ERROR_TEXT = '#be123c';
 
-const activeNav: NavKey = 'devices';
+const rowsPerPage = 8;
 
-function CustomSwitch({
-  value,
-  onValueChange,
-  disabled,
-}: {
-  value: boolean;
-  onValueChange: (next: boolean) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <Switch
-      trackColor={{ false: '#767577', true: '#bfdbfe' }}
-      thumbColor={value ? '#1d4ed8' : '#f4f3f4'}
-      ios_backgroundColor="#3e3e3e"
-      onValueChange={onValueChange}
-      value={value}
-      disabled={disabled}
-      style={{ transform: [{ scaleX: 1.1 }, { scaleY: 1.1 }] }}
-    />
-  );
+function paginationItems(current: number, total: number): (number | 'ellipsis')[] {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+
+  const pages = new Set<number>([1, 2, 3, total - 1, total, current, current - 1, current + 1]);
+  const sorted = [...pages].filter((p) => p >= 1 && p <= total).sort((a, b) => a - b);
+
+  const output: (number | 'ellipsis')[] = [];
+  for (let i = 0; i < sorted.length; i += 1) {
+    if (i > 0 && sorted[i] - sorted[i - 1] > 1) {
+      output.push('ellipsis');
+    }
+    output.push(sorted[i]);
+  }
+  return output;
+}
+
+function displayDevicesTitle(title?: string) {
+  if (!title || title === 'Devices - Dashboards') {
+    return 'Control & manage devices';
+  }
+  return title;
+}
+
+function displayMobileDevicesTitle(title: string) {
+  if (title === 'Control & manage devices') {
+    return 'Devices';
+  }
+  return title;
+}
+
+function DeviceIcon({ id }: { id: string }) {
+  if (id === 'pump') {
+    return <Feather name="droplet" size={22} color={TEXT_PRIMARY} />;
+  }
+  if (id === 'fan') {
+    return <Feather name="wind" size={22} color={TEXT_PRIMARY} />;
+  }
+  if (id === 'speaker') {
+    return <Feather name="volume-2" size={22} color={TEXT_PRIMARY} />;
+  }
+  return <Feather name="sun" size={22} color={TEXT_PRIMARY} />;
+}
+
+function statusPillStyle(status: ManagedDevice['connectionStatus']) {
+  return status === 'online' ? styles.statusOnline : styles.statusOffline;
 }
 
 export default function DevicesScreen() {
@@ -64,17 +95,17 @@ export default function DevicesScreen() {
   const { width } = useWindowDimensions();
   const isDesktop = width >= 960;
 
+  const [devices, setDevices] = useState<ManagedDevice[]>([]);
+  const [pageTitle, setPageTitle] = useState('Control & manage devices');
   const [userName, setUserName] = useState('User');
   const [userEmail, setUserEmail] = useState<string | undefined>();
-  const [devices, setDevices] = useState<ManagedDevice[]>([]);
-  const [rules, setRules] = useState<AutomationRule[]>([]);
-  const [logs, setLogs] = useState<AutomationLog[]>([]);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [pendingId, setPendingId] = useState<string | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [pageTitle, setPageTitle] = useState('Devices - Dashboards');
+  const [devicePage, setDevicePage] = useState(1);
   const [clock, setClock] = useState(() => new Date());
+  const [loading, setLoading] = useState(true);
+  const [pendingPowerId, setPendingPowerId] = useState<string | null>(null);
+  const [pendingModeId, setPendingModeId] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -90,215 +121,132 @@ export default function DevicesScreen() {
   }, [router]);
 
   useEffect(() => {
+    const timer = setInterval(() => setClock(new Date()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const profile = await getUser();
-        const dashboard = await getDashboard();
-        if (!cancelled) {
-          setUserName(profile.displayName);
-          setUserEmail(profile.email);
-          setPageTitle(dashboard.devices.title);
-        }
-      } catch {
-        if (!cancelled) setErrorMessage('Profile or page metadata is temporarily unavailable.');
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    let pollTimer: ReturnType<typeof setInterval> | undefined;
 
-  useEffect(() => {
-    const tick = setInterval(() => setClock(new Date()), 30_000);
-    return () => clearInterval(tick);
-  }, []);
-
-  useEffect(() => {
-    let mounted = true;
-    const load = async () => {
+    async function load() {
       try {
-        const [data, nextRules, nextLogs] = await Promise.all([
+        const [dashboard, managedDevices, profile] = await Promise.all([
+          getDashboard(),
           getManagedDevices(),
-          getAutomationRules().catch(() => []),
-          getAutomationLogs().catch(() => []),
+          getUser(),
         ]);
-        if (mounted) {
-          setDevices(data);
-          setRules(nextRules);
-          setLogs(nextLogs);
-          setErrorMessage(null);
-        }
+
+        if (cancelled) return;
+
+        setPageTitle(displayDevicesTitle(dashboard.devices?.title));
+        setDevices(managedDevices);
+        setUserName(profile.displayName || 'User');
+        setUserEmail(profile.email);
+        setErrorMessage(null);
       } catch (error) {
-        console.log('Failed to load devices', error);
-        if (mounted) setErrorMessage('Unable to load devices right now.');
+        console.log('Devices screen load failed', error);
+        if (!cancelled) {
+          setErrorMessage('Unable to load device data.');
+        }
       } finally {
-        if (mounted) {
+        if (!cancelled) {
           setLoading(false);
         }
       }
-    };
+    }
 
     void load();
-    const interval = setInterval(() => {
-      void load();
-    }, 10000);
+
+    pollTimer = setInterval(() => {
+      void (async () => {
+        try {
+          const managedDevices = await getManagedDevices();
+          if (!cancelled) {
+            setDevices(managedDevices);
+          }
+        } catch {}
+      })();
+    }, 8000);
 
     return () => {
-      mounted = false;
-      clearInterval(interval);
+      cancelled = true;
+      if (pollTimer) clearInterval(pollTimer);
     };
   }, []);
 
-  const filteredDevices = useMemo(
+  const filteredDevices = useMemo<ManagedDevice[]>(
     () =>
       devices.filter(
-        (device) =>
+        (device: ManagedDevice) =>
           device.name.toLowerCase().includes(search.toLowerCase()) ||
           device.id.toLowerCase().includes(search.toLowerCase())
       ),
     [devices, search]
   );
 
-  const ruleByDeviceId = useMemo(
-    () => new Map(rules.map((rule) => [rule.deviceId, rule])),
-    [rules]
-  );
-  const latestLogByDeviceId = useMemo(
-    () =>
-      new Map(
-        [...logs]
-          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-          .map((log) => [log.deviceId, log])
-      ),
-    [logs]
-  );
+  useEffect(() => {
+    setDevicePage(1);
+  }, [search]);
 
-  const formatSensorLabel = (sensorKey: AutomationRule['sensorKey']) => {
-    if (sensorKey === 'soilMoisture') return 'soil moisture';
-    if (sensorKey === 'temperature') return 'temperature';
-    return 'light';
-  };
+  async function handlePower(deviceId: string, next: boolean) {
+    const snapshot = [...devices];
+    setPendingPowerId(deviceId);
 
-  const formatRule = (rule?: AutomationRule) => {
-    if (!rule) return 'No automation rule configured yet.';
-    return `${formatSensorLabel(rule.sensorKey)}: ON when value ${rule.turnOnWhen.operator} ${rule.turnOnWhen.value}, OFF when value ${rule.turnOffWhen.operator} ${rule.turnOffWhen.value}`;
-  };
-
-  const formatAutoLog = (log?: AutomationLog) => {
-    if (!log) return 'No auto action yet.';
-    const time = new Date(log.createdAt).toLocaleTimeString(undefined, {
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-    return `${time}: auto sent ${log.action} (${log.status}) because ${log.reason}`;
-  };
-
-  const formatPowerState = (value: boolean | null) => {
-    if (value === null) return 'Unknown';
-    return value ? 'ON' : 'OFF';
-  };
-
-  const formatRelativeTime = (value: string | null) => {
-    if (!value) return '—';
-    return new Date(value).toLocaleTimeString(undefined, {
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-  };
-
-  const formatCommandStatus = (device: ManagedDevice) => {
-    if (device.lastCommandStatus === 'acked') {
-      return 'Hardware confirmed';
-    }
-    if (device.lastCommandStatus === 'timeout') {
-      return 'Command timeout';
-    }
-    if (device.lastCommandStatus === 'failed') {
-      return 'Backend rejected';
-    }
-    if (device.lastCommandStatus === 'sent') {
-      return 'Backend accepted • Waiting for hardware';
-    }
-    if (device.lastCommandAt) {
-      return 'Backend accepted';
-    }
-    return 'No recent command';
-  };
-
-  const handleToggleAutoMode = async (id: string) => {
-    const snapshot = devices.map((device) => ({ ...device }));
     setDevices((current) =>
-      current.map((device) =>
-        device.id === id ? { ...device, autoMode: !device.autoMode } : device
-      )
+      current.map((device) => (device.id === deviceId ? { ...device, power: next } : device))
     );
+
     try {
-      await toggleManagedDeviceAutoMode(id);
-      const [next, nextRules, nextLogs] = await Promise.all([
-        getManagedDevices(),
-        getAutomationRules().catch(() => rules),
-        getAutomationLogs().catch(() => logs),
-      ]);
-      setDevices(next);
-      setRules(nextRules);
-      setLogs(nextLogs);
+      await updateManagedDevicePower(deviceId, next ? 'ON' : 'OFF');
+      const refreshed = await getManagedDevices();
+      setDevices(refreshed);
       setErrorMessage(null);
     } catch (error) {
-      console.log('Failed to update auto mode', error);
+      console.log('updateManagedDevicePower failed', error);
       setDevices(snapshot);
-      setErrorMessage('Unable to update auto mode right now.');
+      setErrorMessage('Unable to send power command.');
+    } finally {
+      setPendingPowerId(null);
     }
-  };
+  }
 
-  const handleTogglePower = async (id: string, currentValue: boolean) => {
-    const nextValue = !currentValue;
-    setPendingId(id);
+  async function handleAutoMode(deviceId: string) {
+    const snapshot = [...devices];
+    setPendingModeId(deviceId);
+
     setDevices((current) =>
       current.map((device) =>
-        device.id === id
-          ? {
-              ...device,
-              power: nextValue,
-              desiredPower: nextValue,
-              lastCommandStatus: 'sent',
-              lastCommandAt: new Date().toISOString(),
-            }
-          : device
+        device.id === deviceId ? { ...device, autoMode: !device.autoMode } : device
       )
     );
 
     try {
-      await updateManagedDevicePower(id, nextValue ? 'ON' : 'OFF');
-      const [nextDevices, nextLogs] = await Promise.all([
-        getManagedDevices(),
-        getAutomationLogs().catch(() => logs),
-      ]);
-      setDevices(nextDevices);
-      setLogs(nextLogs);
+      const updated = await toggleManagedDeviceAutoMode(deviceId);
+      setDevices(updated);
       setErrorMessage(null);
     } catch (error) {
-      console.log('Failed to update power', error);
-      setDevices((current) =>
-        current.map((device) => (device.id === id ? { ...device, power: currentValue } : device))
-      );
-      setErrorMessage('Unable to update power right now.');
+      console.log('toggleManagedDeviceAutoMode failed', error);
+      setDevices(snapshot);
+      setErrorMessage('Unable to update automation mode.');
     } finally {
-      setPendingId(null);
+      setPendingModeId(null);
     }
-  };
+  }
 
   const handleNavPress = (key: NavKey) => {
-    if (key === 'home') {
-      router.push('/home');
-      return;
+    if (key !== 'devices') {
+      router.push(`/${key}`);
     }
-    if (key === 'analytics') {
-      router.push('/analytics');
-      return;
-    }
-    router.push('/devices');
   };
+
+  const totalPages = Math.max(1, Math.ceil(filteredDevices.length / rowsPerPage));
+  const safePage = Math.min(devicePage, totalPages);
+  const pagedDevices = filteredDevices.slice(
+    (safePage - 1) * rowsPerPage,
+    (safePage - 1) * rowsPerPage + rowsPerPage
+  );
+  const pageItems = paginationItems(safePage, totalPages);
 
   const renderSidebar = () => (
     <View style={styles.sidebar}>
@@ -316,14 +264,14 @@ export default function DevicesScreen() {
 
         <View style={styles.navList}>
           {sidebarItems.map((item) => {
-            const isActive = item.key === activeNav;
+            const isActive = item.key === 'devices';
             return (
               <Pressable
                 key={item.key}
                 onPress={() => handleNavPress(item.key)}
                 style={[styles.navItem, isActive && styles.navItemActive]}
               >
-                <Feather name={item.icon} size={20} color={isActive ? '#ffffff' : '#111111'} />
+                <Feather name={item.icon} size={26} color={TEXT_PRIMARY} />
                 <Text style={[styles.navText, isActive && styles.navTextActive]}>{item.label}</Text>
               </Pressable>
             );
@@ -335,174 +283,226 @@ export default function DevicesScreen() {
     </View>
   );
 
-  const renderMobileNav = () => (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.mobileNav}
-    >
-      {sidebarItems.map((item) => {
-        const isActive = item.key === activeNav;
-        return (
-          <Pressable
-            key={item.key}
-            onPress={() => handleNavPress(item.key)}
-            style={[styles.mobileNavItem, isActive && styles.mobileNavItemActive]}
-          >
-            <Feather name={item.icon} size={16} color={isActive ? '#ffffff' : '#111111'} />
-            <Text style={[styles.mobileNavText, isActive && styles.mobileNavTextActive]}>
-              {item.label}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </ScrollView>
-  );
-
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.page}>
         {isDesktop ? renderSidebar() : null}
 
         <View style={styles.mainArea}>
-          <View style={styles.topBar}>
-            <Text style={styles.pageTitle}>{pageTitle}</Text>
-            <View style={styles.timeWrap}>
-              <Text style={styles.timeText}>
-                {clock.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+          <View style={[styles.topBar, !isDesktop && styles.mobileTopBar]}>
+            <View style={!isDesktop ? styles.mobileTitleWrap : undefined}>
+              <Text style={[styles.pageTitle, !isDesktop && styles.mobilePageTitle]}>
+                {isDesktop ? pageTitle : displayMobileDevicesTitle(pageTitle)}
               </Text>
-              <Text style={styles.dateText}>
-                {clock.toLocaleDateString(undefined, {
-                  day: '2-digit',
-                  month: '2-digit',
-                  year: '2-digit',
-                })}
-              </Text>
+              {!isDesktop ? (
+                <Text style={styles.headerSubText}>
+                  {filteredDevices.length} device{filteredDevices.length === 1 ? '' : 's'}
+                </Text>
+              ) : null}
+            </View>
+
+            <View style={styles.topBarRight}>
+              <MobileHeaderMenu
+                userName={userName}
+                userEmail={userEmail}
+                onLogout={async () => {
+                  await clearTokens();
+                  router.replace('/');
+                }}
+              />
             </View>
           </View>
 
-          {!isDesktop ? renderMobileNav() : null}
-
           <ScrollView
             style={styles.container}
-            contentContainerStyle={styles.content}
-            showsVerticalScrollIndicator={false}
+            contentContainerStyle={[styles.content, isDesktop && styles.contentDesktop]}
           >
             {errorMessage ? <Text style={styles.errorBanner}>{errorMessage}</Text> : null}
-            <Text style={styles.introText}>Search and control connected farm devices.</Text>
-            <Text style={styles.helperNote}>
-              Switches follow backend desired state. Hardware confirmation is shown separately below
-              each device.
-            </Text>
 
-            <View style={styles.topBarRow}>
-              <View style={styles.dropdown}>
-                <Text style={styles.dropdownText}>All</Text>
-                <Ionicons name="chevron-down" size={16} color="#000000" />
+            <View style={[styles.toolbar, !isDesktop && styles.mobileToolbar]}>
+              <View style={[styles.filterButton, !isDesktop && styles.mobileFilterButton]}>
+                <Text style={styles.filterText}>All</Text>
+                <Feather name="chevron-down" size={16} color={TEXT_PRIMARY} />
               </View>
 
-              <View style={styles.searchContainer}>
-                <Ionicons
-                  name="options-outline"
-                  size={20}
-                  color="#9ca3af"
-                  style={styles.filterIcon}
-                />
+              <View style={[styles.searchWrap, !isDesktop && styles.mobileSearchWrap]}>
+                <Feather name="sliders" size={18} color="#8b8b8b" />
                 <TextInput
                   style={styles.searchInput}
                   placeholder="Search"
+                  placeholderTextColor="#9a9a9a"
                   value={search}
                   onChangeText={setSearch}
-                  placeholderTextColor="#93a0a7"
                 />
                 <View style={styles.searchButton}>
-                  <Ionicons name="search" size={20} color="#000000" />
+                  <Feather name="search" size={28} color={TEXT_PRIMARY} />
                 </View>
               </View>
             </View>
 
-            <View style={styles.panel}>
-              <View style={styles.tableHeader}>
-                <Text style={[styles.headerCell, { flex: 0.8 }]}>ID</Text>
-                <Text style={[styles.headerCell, { flex: 2 }]}>Device name</Text>
-                <Text style={[styles.headerCell, styles.headerCellCentered]}>Auto mode</Text>
-                <Text style={[styles.headerCell, styles.headerCellCentered]}>Power</Text>
-              </View>
-
-              {loading ? (
-                <View style={styles.loadingWrap}>
-                  <ActivityIndicator size="large" color="#22c55e" />
-                </View>
-              ) : (
-                filteredDevices.map((item, index) => (
-                  <View
-                    key={item.id}
-                    style={[
-                      styles.tableRow,
-                      index !== filteredDevices.length - 1 && styles.separator,
-                    ]}
-                  >
-                    <Text style={[styles.cell, { flex: 0.8 }]}>{item.id}</Text>
-                    <View style={{ flex: 2, paddingRight: 12 }}>
-                      <Text style={styles.cell}>{item.name}</Text>
-                      <Text style={styles.metaText}>
-                        Auto mode will control this device based on sensor thresholds.
-                      </Text>
-                      <Text style={styles.metaText}>{formatRule(ruleByDeviceId.get(item.id))}</Text>
-                      <Text style={styles.metaText}>
-                        {formatAutoLog(latestLogByDeviceId.get(item.id))}
-                      </Text>
-                      <Text style={styles.metaText}>
-                        Desired power: {formatPowerState(item.desiredPower)} | Actual power:{' '}
-                        {formatPowerState(item.actualPower)}
-                      </Text>
-                      <Text style={styles.metaText}>
-                        Command state: {formatCommandStatus(item)}
-                      </Text>
-                      <Text style={styles.metaText}>
-                        Last command: {formatRelativeTime(item.lastCommandAt)} | Last ACK:{' '}
-                        {formatRelativeTime(item.lastAckAt)}
-                      </Text>
-                      <Text style={styles.metaText}>
-                        Connection: {item.connectionStatus} | Last seen:{' '}
-                        {formatRelativeTime(item.lastSeenAt)}
-                      </Text>
-                    </View>
-                    <View style={[styles.cellWrap, { flex: 1 }]}>
-                      <CustomSwitch
-                        value={item.autoMode}
-                        disabled={!ruleByDeviceId.has(item.id)}
-                        onValueChange={() => {
-                          void handleToggleAutoMode(item.id);
-                        }}
-                      />
-                    </View>
-                    <View style={[styles.cellWrap, { flex: 1 }]}>
-                      <View style={styles.powerWrap}>
-                        <CustomSwitch
-                          value={item.desiredPower}
-                          onValueChange={() => {
-                            void handleTogglePower(item.id, item.desiredPower);
-                          }}
-                        />
-                        {pendingId === item.id ? (
-                          <ActivityIndicator size="small" color="#1d4ed8" />
-                        ) : null}
-                      </View>
-                    </View>
+            {isDesktop ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={styles.tablePanel}>
+                  <View style={styles.tableHeader}>
+                    <Text style={[styles.headerText, styles.idColumn]}>ID</Text>
+                    <Text style={[styles.headerText, styles.nameColumn]}>Device name</Text>
+                    <Text style={[styles.headerText, styles.switchColumn]}>Auto mode</Text>
+                    <Text style={[styles.headerText, styles.switchColumn]}>Power</Text>
                   </View>
-                ))
-              )}
 
-              {!loading && filteredDevices.length === 0 ? (
-                <View style={styles.emptyWrap}>
-                  <Text style={styles.emptyText}>No devices match your search.</Text>
+                  {loading ? (
+                    <View style={styles.loadingRow}>
+                      <ActivityIndicator size="large" color={ACCENT} />
+                    </View>
+                  ) : null}
+
+                  {!loading && pagedDevices.length === 0 ? (
+                    <View style={styles.loadingRow}>
+                      <Text style={styles.emptyText}>No devices found.</Text>
+                    </View>
+                  ) : null}
+
+                  {!loading
+                    ? pagedDevices.map((item: ManagedDevice, index: number) => (
+                        <View key={item.id} style={styles.tableRow}>
+                          <Text style={[styles.cellText, styles.idColumn]}>
+                            {(safePage - 1) * rowsPerPage + index}
+                          </Text>
+                          <Text style={[styles.cellText, styles.nameColumn]} numberOfLines={1}>
+                            {item.name}
+                          </Text>
+
+                          <View style={[styles.switchColumn, styles.switchCell]}>
+                            <Toggle
+                              checked={item.autoMode}
+                              loading={pendingModeId === item.id}
+                              onChange={() => {
+                                void handleAutoMode(item.id);
+                              }}
+                            />
+                          </View>
+
+                          <View style={[styles.switchColumn, styles.switchCell]}>
+                            <Toggle
+                              checked={item.power}
+                              loading={pendingPowerId === item.id}
+                              onChange={(next) => {
+                                void handlePower(item.id, next);
+                              }}
+                            />
+                          </View>
+                        </View>
+                      ))
+                    : null}
                 </View>
-              ) : null}
-            </View>
+              </ScrollView>
+            ) : (
+              <View style={styles.deviceList}>
+                {loading ? (
+                  <View style={styles.mobileLoadingCard}>
+                    <ActivityIndicator size="large" color={ACCENT} />
+                  </View>
+                ) : null}
+
+                {!loading && pagedDevices.length === 0 ? (
+                  <View style={styles.mobileLoadingCard}>
+                    <Text style={styles.emptyText}>No devices found.</Text>
+                  </View>
+                ) : null}
+
+                {!loading
+                  ? pagedDevices.map((item: ManagedDevice) => (
+                      <View key={item.id} style={styles.deviceCard}>
+                        <View style={styles.deviceCardHeader}>
+                          <View style={styles.deviceIdentity}>
+                            <View style={styles.deviceIcon}>
+                              <DeviceIcon id={item.id} />
+                            </View>
+                            <View style={styles.deviceTextWrap}>
+                              <Text style={styles.deviceName}>{item.name}</Text>
+                              <Text style={styles.deviceMeta}>ID {item.id}</Text>
+                            </View>
+                          </View>
+
+                          {item.connectionStatus !== 'unknown' ? (
+                            <View
+                              style={[styles.statusPill, statusPillStyle(item.connectionStatus)]}
+                            >
+                              <Text style={styles.statusText}>{item.connectionStatus}</Text>
+                            </View>
+                          ) : null}
+                        </View>
+
+                        <View style={styles.mobileControls}>
+                          <View style={styles.mobileControlLine}>
+                            <View>
+                              <Text style={styles.mobileControlTitle}>Auto mode</Text>
+                              <Text style={styles.mobileControlMeta}>
+                                {pendingModeId === item.id
+                                  ? 'Updating'
+                                  : item.autoMode
+                                    ? 'On'
+                                    : 'Off'}
+                              </Text>
+                            </View>
+                            <Toggle
+                              checked={item.autoMode}
+                              loading={pendingModeId === item.id}
+                              onChange={() => {
+                                void handleAutoMode(item.id);
+                              }}
+                            />
+                          </View>
+
+                          <View style={styles.mobileControlLine}>
+                            <View>
+                              <Text style={styles.mobileControlTitle}>Power</Text>
+                              <Text style={styles.mobileControlMeta}>
+                                {pendingPowerId === item.id ? 'Sending' : item.power ? 'On' : 'Off'}
+                              </Text>
+                            </View>
+                            <Toggle
+                              checked={item.power}
+                              loading={pendingPowerId === item.id}
+                              onChange={(next) => {
+                                void handlePower(item.id, next);
+                              }}
+                            />
+                          </View>
+                        </View>
+                      </View>
+                    ))
+                  : null}
+              </View>
+            )}
+
+            {totalPages > 1 ? (
+              <View style={[styles.pagination, !isDesktop && styles.mobilePagination]}>
+                {pageItems.map((entry, idx) =>
+                  entry === 'ellipsis' ? (
+                    <Text key={`d-el-${idx}`} style={styles.pageEllipsis}>
+                      ...
+                    </Text>
+                  ) : (
+                    <Pressable
+                      key={`d-${entry}`}
+                      onPress={() => setDevicePage(entry)}
+                      style={[styles.pageDot, entry === safePage && styles.pageDotActive]}
+                    >
+                      <Text
+                        style={[styles.pageDotText, entry === safePage && styles.pageDotTextActive]}
+                      >
+                        {entry}
+                      </Text>
+                    </Pressable>
+                  )
+                )}
+              </View>
+            ) : null}
           </ScrollView>
         </View>
       </View>
+      {!isDesktop ? <BottomNav activeKey="devices" /> : null}
     </SafeAreaView>
   );
 }
@@ -518,266 +518,428 @@ const styles = StyleSheet.create({
     backgroundColor: PAGE_BG,
   },
   sidebar: {
-    width: 176,
-    backgroundColor: '#ffffff',
+    width: 240,
+    backgroundColor: PANEL_BG,
     borderRightWidth: 1,
-    borderRightColor: '#d5d5d5',
+    borderRightColor: PANEL_BORDER,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
     justifyContent: 'space-between',
   },
   brandRow: {
-    height: 70,
+    height: 94,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
-    gap: 10,
+    gap: 14,
+    paddingHorizontal: 16,
   },
   brandLogo: {
-    width: 38,
-    height: 38,
+    width: 48,
+    height: 48,
   },
   brandText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#111111',
+    fontSize: 26,
+    fontWeight: '800',
+    color: TEXT_PRIMARY,
   },
   sidebarDivider: {
     height: 1,
-    backgroundColor: '#d5d5d5',
+    backgroundColor: PANEL_BORDER,
   },
   navList: {
-    paddingTop: 54,
+    marginTop: 66,
   },
   navItem: {
-    height: 46,
+    height: 64,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
-    paddingHorizontal: 10,
+    gap: 20,
+    borderRadius: 0,
+    paddingHorizontal: 16,
   },
   navItemActive: {
     backgroundColor: ACCENT_GREEN,
   },
   navText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#111111',
+    fontSize: 20,
+    fontWeight: '700',
+    color: TEXT_PRIMARY,
   },
   navTextActive: {
-    fontWeight: '700',
-    color: '#ffffff',
+    color: TEXT_PRIMARY,
   },
   mainArea: {
     flex: 1,
   },
   topBar: {
-    minHeight: 52,
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    backgroundColor: '#ffffff',
+    height: 64,
+    paddingHorizontal: 56,
+    backgroundColor: PANEL_BG,
     borderBottomWidth: 1,
-    borderBottomColor: '#d5d5d5',
+    borderBottomColor: PANEL_BORDER,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 2,
+  },
+  mobileTopBar: {
+    height: 'auto',
+    minHeight: 84,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    alignItems: 'flex-start',
+  },
+  mobileTitleWrap: {
+    flex: 1,
+    gap: 2,
   },
   pageTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: TEXT_PRIMARY,
+  },
+  mobilePageTitle: {
+    fontSize: 28,
+    fontWeight: '800',
+  },
+  headerSubText: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#111111',
+    color: TEXT_SECONDARY,
   },
   timeWrap: {
     alignItems: 'flex-end',
   },
+  mobileTimeWrap: {
+    paddingTop: 3,
+  },
   timeText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#111111',
+    fontSize: 18,
+    fontWeight: '800',
+    color: TEXT_PRIMARY,
   },
   dateText: {
     marginTop: 2,
-    fontSize: 11,
-    color: '#505050',
+    fontSize: 16,
+    color: TEXT_SECONDARY,
   },
   mobileNav: {
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 10,
-    backgroundColor: PAGE_BG,
-    borderBottomWidth: 1,
-    borderBottomColor: '#d5d5d5',
+    paddingTop: 4,
+    paddingBottom: 12,
+    gap: 8,
   },
   mobileNavItem: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
+    minHeight: 42,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: '#ffffff',
-    borderWidth: 1,
-    borderColor: '#d9d9d9',
   },
   mobileNavItemActive: {
     backgroundColor: ACCENT_GREEN,
+    borderColor: ACCENT_GREEN,
   },
   mobileNavText: {
     fontSize: 13,
-    fontWeight: '600',
-    color: '#111111',
+    fontWeight: '700',
+    color: TEXT_PRIMARY,
   },
   mobileNavTextActive: {
-    color: '#ffffff',
+    color: TEXT_PRIMARY,
   },
   container: {
     flex: 1,
   },
   content: {
-    paddingHorizontal: 20,
-    paddingTop: 36,
-    paddingBottom: 28,
+    paddingHorizontal: 16,
+    paddingTop: 18,
+    paddingBottom: 96,
+    gap: 18,
   },
-  introText: {
-    fontSize: 14,
-    color: '#505050',
-    marginBottom: 6,
+  contentDesktop: {
+    paddingHorizontal: 100,
+    paddingTop: 40,
   },
-  helperNote: {
-    fontSize: 12,
-    color: '#6b7280',
-    marginBottom: 18,
-  },
-  topBarRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 12,
-    marginBottom: 18,
-  },
-  dropdown: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 10,
+  errorBanner: {
+    borderRadius: 16,
+    backgroundColor: ERROR_BG,
+    color: ERROR_TEXT,
     paddingHorizontal: 14,
-    paddingVertical: 10,
-    backgroundColor: '#ffffff',
-  },
-  dropdownText: {
-    marginRight: 8,
+    paddingVertical: 12,
     fontSize: 14,
-    color: '#111827',
+    fontWeight: '700',
   },
-  searchContainer: {
+  toolbar: {
     flexDirection: 'row',
     alignItems: 'center',
-    flex: 1,
-    minWidth: 260,
-    maxWidth: 460,
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 10,
-    backgroundColor: '#ffffff',
-    overflow: 'hidden',
+    gap: 12,
+    flexWrap: 'wrap',
   },
-  filterIcon: {
-    paddingHorizontal: 12,
+  mobileToolbar: {
+    alignItems: 'stretch',
+    gap: 10,
+  },
+  filterButton: {
+    height: 41,
+    minWidth: 75,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#9c9c9c',
+    backgroundColor: '#f4f4f4',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  mobileFilterButton: {
+    minHeight: 44,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 16,
+  },
+  filterText: {
+    fontSize: 16,
+    color: TEXT_PRIMARY,
+  },
+  searchWrap: {
+    width: 400,
+    maxWidth: '100%',
+    height: 40,
+    borderWidth: 1,
+    borderColor: '#a4a4a4',
+    borderRadius: 10,
+    backgroundColor: PANEL_BG,
+    overflow: 'hidden',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: 14,
+  },
+  mobileSearchWrap: {
+    width: '100%',
+    height: 50,
+    borderRadius: 16,
+    borderColor: '#d8d8d8',
   },
   searchInput: {
     flex: 1,
-    height: 44,
-    fontSize: 14,
-    color: '#111827',
+    height: '100%',
+    paddingHorizontal: 14,
+    fontSize: 18,
+    color: TEXT_PRIMARY,
   },
   searchButton: {
-    backgroundColor: ACCENT_GREEN,
-    paddingHorizontal: 16,
-    height: 44,
-    justifyContent: 'center',
+    width: 50,
+    height: '100%',
     alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: ACCENT_GREEN,
   },
-  panel: {
-    backgroundColor: '#ffffff',
-    borderRadius: 10,
+  tablePanel: {
+    width: 1000,
+    minHeight: 700,
+    backgroundColor: PANEL_BG,
     borderWidth: 1,
-    borderColor: '#e8e8e8',
-    overflow: 'hidden',
+    borderColor: '#d7d7d7',
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    elevation: 3,
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  tablePanelCompact: {
+    width: 760,
+    minHeight: 520,
   },
   tableHeader: {
-    flexDirection: 'row',
+    height: 80,
     backgroundColor: ACCENT_GREEN,
-    paddingVertical: 16,
-    paddingHorizontal: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 32,
   },
-  headerCell: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#111111',
+  tableRow: {
+    minHeight: 74,
+    borderBottomWidth: 1,
+    borderBottomColor: '#d2d2d2',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 32,
   },
-  headerCellCentered: {
+  headerText: {
+    fontSize: 20,
+    fontWeight: '400',
+    color: TEXT_PRIMARY,
+  },
+  cellText: {
+    fontSize: 22,
+    fontWeight: '400',
+    color: TEXT_PRIMARY,
+  },
+  idColumn: {
+    width: 116,
+  },
+  nameColumn: {
     flex: 1,
-    textAlign: 'center',
   },
-  loadingWrap: {
+  switchColumn: {
+    width: 200,
+  },
+  switchCell: {
+    alignItems: 'center',
+  },
+  loadingRow: {
     minHeight: 220,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  tableRow: {
+  emptyText: {
+    fontSize: 16,
+    color: TEXT_SECONDARY,
+  },
+  deviceList: {
+    gap: 14,
+  },
+  mobileLoadingCard: {
+    minHeight: 160,
+    borderRadius: 20,
+    backgroundColor: PANEL_BG,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  deviceCard: {
+    borderRadius: 22,
+    backgroundColor: PANEL_BG,
+    padding: 16,
+    gap: 16,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 1,
+  },
+  deviceCardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
+    justifyContent: 'space-between',
+    gap: 12,
   },
-  cell: {
-    fontSize: 14,
-    color: '#111827',
+  deviceIdentity: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
-  metaText: {
-    marginTop: 2,
-    fontSize: 11,
-    color: '#6b7280',
-  },
-  cellWrap: {
+  deviceIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: '#f4f7f4',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  powerWrap: {
+  deviceTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  deviceName: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: TEXT_PRIMARY,
+  },
+  deviceMeta: {
+    marginTop: 3,
+    fontSize: 12,
+    color: TEXT_SECONDARY,
+  },
+  statusPill: {
     minHeight: 32,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 6,
-  },
-  separator: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#d9d9d9',
-  },
-  emptyWrap: {
-    paddingVertical: 24,
+    borderRadius: 999,
+    paddingHorizontal: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  emptyText: {
-    fontSize: 14,
-    color: '#6b7280',
+  statusOnline: {
+    backgroundColor: '#e6f8e9',
   },
-  errorBanner: {
-    marginBottom: 16,
-    borderRadius: 10,
-    backgroundColor: '#fee2e2',
-    color: '#991b1b',
+  statusOffline: {
+    backgroundColor: '#f3f3f3',
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: TEXT_PRIMARY,
+    textTransform: 'capitalize',
+  },
+  mobileControls: {
+    gap: 10,
+  },
+  mobileControlLine: {
+    minHeight: 58,
+    borderRadius: 16,
+    backgroundColor: '#f8f8f8',
     paddingHorizontal: 14,
     paddingVertical: 10,
-    fontSize: 13,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+  },
+  mobileControlTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: TEXT_PRIMARY,
+  },
+  mobileControlMeta: {
+    marginTop: 2,
+    fontSize: 12,
+    color: TEXT_SECONDARY,
+  },
+  pagination: {
+    width: 1000,
+    maxWidth: '100%',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 18,
+    paddingTop: 18,
+    paddingRight: 10,
+  },
+  mobilePagination: {
+    width: '100%',
+    justifyContent: 'center',
+    paddingRight: 0,
+  },
+  pageDot: {
+    minWidth: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
+  pageDotActive: {
+    backgroundColor: ACCENT_GREEN,
+  },
+  pageDotText: {
+    fontSize: 16,
+    fontWeight: '400',
+    color: TEXT_PRIMARY,
+  },
+  pageDotTextActive: {
+    color: TEXT_PRIMARY,
+  },
+  pageEllipsis: {
+    fontSize: 16,
+    color: TEXT_PRIMARY,
+  },
+  topBarRight: {
+    paddingTop: 12,
+    justifyContent: 'center',
+    alignItems: 'flex-end',
   },
 });

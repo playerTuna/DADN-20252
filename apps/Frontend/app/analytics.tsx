@@ -1,6 +1,8 @@
+import { BottomNav } from '../components/BottomNav';
 import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
+import { MobileHeaderMenu } from '@/components/MobileHeaderMenu';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -12,48 +14,91 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { sidebarItems } from '../constants/navigation';
+import { Circle, Defs, LinearGradient, Path, Stop, Svg } from 'react-native-svg';
+
 import { UserMenu } from '../components/UserMenu';
+import { sidebarItems } from '../constants/navigation';
 import { getDashboard, getTelemetryHistory, getUser, type TelemetryPoint } from '../services/api';
-import { getTokens } from '../services/auth';
-import type { NavKey } from '../types/dashboard';
+import { clearTokens, getTokens } from '../services/auth';
+import type { NavKey, StatItem } from '../types/dashboard';
 
-const ACCENT_GREEN = '#22ff66';
 const PAGE_BG = '#e5e5e5';
-const CARD_BG = '#ffffff';
-const BORDER = '#d9d9d9';
-const ACTIVE = ACCENT_GREEN;
+const PANEL_BG = '#ffffff';
+const PANEL_BORDER = '#d2d2d2';
+const ACCENT = '#160f9b';
+const ACCENT_GREEN = '#28f464';
+const TEXT_PRIMARY = '#050505';
+const TEXT_SECONDARY = '#555555';
+const ERROR_BG = '#ffe4e6';
+const ERROR_TEXT = '#be123c';
+const CHART_LINE = '#b59b42';
+const CHART_INSET = 10;
 
-const TABS = [
-  { label: 'Temperature', value: 'temp' },
-  { label: 'Air Humidity', value: 'air_humidity' },
-  { label: 'Soil Humidity', value: 'soil_humidity' },
-  { label: 'Light Intensity', value: 'light' },
-] as const;
+type AnalyticsTab = 'temp' | 'air_humidity' | 'soil_humidity' | 'light';
 
-type TabValue = (typeof TABS)[number]['value'];
+type ChartPoint = {
+  id: string;
+  x: number;
+  y: number;
+  value: number;
+  label: string;
+};
 
-const activeNav: NavKey = 'analytics';
+const TAB_LABELS: Record<AnalyticsTab, string> = {
+  temp: 'Temperature',
+  air_humidity: 'Air Humidity',
+  soil_humidity: 'Soil Humidity',
+  light: 'Light Intensity',
+};
 
-function formatTimeLabel(iso: string) {
+function displayAnalyticsTitle(title?: string) {
+  if (!title || title === 'Analytics - Dashboards') {
+    return 'Environment Analytics';
+  }
+  return title;
+}
+
+function formatTick(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function formatReadingTime(iso: string) {
   const date = new Date(iso);
-  return `${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function makeSmoothPath(points: ChartPoint[]) {
+  if (points.length === 0) return '';
+  if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
+
+  return points.reduce((path, point, index) => {
+    if (index === 0) {
+      return `M ${point.x} ${point.y}`;
+    }
+
+    const previous = points[index - 1];
+    const controlX = (previous.x + point.x) / 2;
+    return `${path} C ${controlX} ${previous.y}, ${controlX} ${point.y}, ${point.x} ${point.y}`;
+  }, '');
 }
 
 export default function AnalyticsScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const isDesktop = width >= 960;
-  const chartWidth = Math.min(Math.max(width - (isDesktop ? 176 + 72 : 72), 280), 980);
 
+  const [pageTitle, setPageTitle] = useState('Environment Analytics');
   const [userName, setUserName] = useState('User');
   const [userEmail, setUserEmail] = useState<string | undefined>();
-  const [activeTab, setActiveTab] = useState<TabValue>('temp');
-  const [points, setPoints] = useState<TelemetryPoint[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [pageTitle, setPageTitle] = useState('Analytics - Dashboards');
+  const [activeTab, setActiveTab] = useState<AnalyticsTab>('temp');
+  const [series, setSeries] = useState<TelemetryPoint[]>([]);
+  const [stats, setStats] = useState<StatItem[]>([]);
+  const [plotSize, setPlotSize] = useState({ width: 0, height: 0 });
   const [clock, setClock] = useState(() => new Date());
+  const [loading, setLoading] = useState(true);
+  const [chartLoading, setChartLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -69,94 +114,174 @@ export default function AnalyticsScreen() {
   }, [router]);
 
   useEffect(() => {
+    const timer = setInterval(() => setClock(new Date()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
-    (async () => {
+
+    void (async () => {
       try {
-        const profile = await getUser();
-        const dashboard = await getDashboard();
+        const [dashboard, profile] = await Promise.all([getDashboard(), getUser()]);
+        if (cancelled) return;
+
+        setPageTitle(displayAnalyticsTitle(dashboard.analytics?.title));
+        setStats(dashboard.analytics?.stats || []);
+        setUserName(profile.displayName || 'User');
+        setUserEmail(profile.email);
+        setErrorMessage(null);
+      } catch (error) {
+        console.log('Analytics bootstrap failed', error);
         if (!cancelled) {
-          setUserName(profile.displayName);
-          setUserEmail(profile.email);
-          setPageTitle(dashboard.analytics.title);
+          setErrorMessage('Unable to load analytics dashboard.');
         }
-      } catch {
-        if (!cancelled) setErrorMessage('Profile or page metadata is temporarily unavailable.');
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     })();
+
     return () => {
       cancelled = true;
     };
   }, []);
 
   useEffect(() => {
-    const tick = setInterval(() => setClock(new Date()), 30_000);
-    return () => clearInterval(tick);
-  }, []);
+    let cancelled = false;
 
-  useEffect(() => {
-    let mounted = true;
-    const load = async () => {
-      setLoading(true);
+    void (async () => {
+      setChartLoading(true);
       try {
         const data = await getTelemetryHistory(activeTab);
-        if (mounted) {
-          setPoints(data);
-          setErrorMessage(null);
+        if (!cancelled) {
+          setSeries(data);
         }
       } catch (error) {
-        console.log('Failed to load telemetry', error);
-        if (mounted) {
-          setPoints([]);
-          setErrorMessage('Unable to load telemetry right now.');
+        console.log('Telemetry history load failed', error);
+        if (!cancelled) {
+          setErrorMessage('Unable to load telemetry history.');
         }
       } finally {
-        if (mounted) {
-          setLoading(false);
+        if (!cancelled) {
+          setChartLoading(false);
         }
       }
-    };
-
-    void load();
-    const interval = setInterval(() => {
-      void load();
-    }, 10000);
+    })();
 
     return () => {
-      mounted = false;
-      clearInterval(interval);
+      cancelled = true;
     };
   }, [activeTab]);
 
-  const chartMeta = useMemo(() => {
-    if (!points.length) {
+  const visiblePointCount = isDesktop ? 12 : 8;
+
+  const chartRows = useMemo(
+    () => series.slice(0, visiblePointCount).reverse(),
+    [series, visiblePointCount]
+  );
+
+  const chartBounds = useMemo(() => {
+    if (!chartRows.length) {
+      return { min: 0, max: activeTab === 'light' ? 100 : 36 };
+    }
+
+    const values = chartRows.map((item) => item.numericValue);
+    const rawMin = Math.min(...values);
+    const rawMax = Math.max(...values);
+    const baseStep = activeTab === 'temp' ? 5 : activeTab === 'light' ? 100 : 10;
+
+    if (rawMin === rawMax) {
+      const padding = Math.max(baseStep, Math.abs(rawMax) * 0.08);
       return {
-        min: 0,
-        max: 1,
-        range: 1,
-        values: [0],
+        min: Math.max(0, Math.floor((rawMin - padding) / baseStep) * baseStep),
+        max: Math.ceil((rawMax + padding) / baseStep) * baseStep,
       };
     }
-    const values = points.map((item) => item.numericValue);
+
+    const padding = Math.max((rawMax - rawMin) * 0.22, baseStep);
+    const min = Math.max(0, Math.floor((rawMin - padding) / baseStep) * baseStep);
+    const max = Math.ceil((rawMax + padding) / baseStep) * baseStep;
+
+    return { min, max: max > min ? max : min + baseStep };
+  }, [activeTab, chartRows]);
+
+  const yTicks = useMemo(() => {
+    const range = chartBounds.max - chartBounds.min || 1;
+    return Array.from({ length: 5 }, (_, index) => chartBounds.max - (range / 4) * index);
+  }, [chartBounds]);
+
+  const xLabels = useMemo(
+    () => chartRows.map((item) => formatReadingTime(item.receivedAt)),
+    [chartRows]
+  );
+
+  const verticalGridLines = useMemo(
+    () => Array.from({ length: Math.max(chartRows.length, 2) }, (_, index) => index),
+    [chartRows.length]
+  );
+
+  const chartPoints = useMemo<ChartPoint[]>(() => {
+    if (plotSize.width <= 0 || plotSize.height <= 0 || chartRows.length === 0) return [];
+
+    const drawableWidth = Math.max(plotSize.width - CHART_INSET * 2, 1);
+    const drawableHeight = Math.max(plotSize.height - CHART_INSET * 2, 1);
+    const range = chartBounds.max - chartBounds.min || 1;
+    const stepX = chartRows.length > 1 ? drawableWidth / (chartRows.length - 1) : 0;
+
+    return chartRows.map((item, index) => {
+      const normalized = (item.numericValue - chartBounds.min) / range;
+      return {
+        id: item.id,
+        x: chartRows.length === 1 ? plotSize.width / 2 : CHART_INSET + index * stepX,
+        y: CHART_INSET + (1 - normalized) * drawableHeight,
+        value: item.numericValue,
+        label: formatReadingTime(item.receivedAt),
+      };
+    });
+  }, [chartBounds, chartRows, plotSize]);
+
+  const chartPath = useMemo(() => makeSmoothPath(chartPoints), [chartPoints]);
+
+  const chartAreaPath = useMemo(() => {
+    if (!chartPath || chartPoints.length < 2) return '';
+    const first = chartPoints[0];
+    const last = chartPoints[chartPoints.length - 1];
+    const baseline = plotSize.height - CHART_INSET;
+    return `${chartPath} L ${last.x} ${baseline} L ${first.x} ${baseline} Z`;
+  }, [chartPath, chartPoints, plotSize.height]);
+
+  const summaryItems = useMemo(() => {
+    if (!series.length) {
+      return [
+        { label: 'Latest', value: '-' },
+        { label: 'Min', value: '-' },
+        { label: 'Max', value: '-' },
+        { label: 'Average', value: '-' },
+      ];
+    }
+
+    const values = series.map((item) => item.numericValue);
+    const latest = series[0].numericValue;
     const min = Math.min(...values);
     const max = Math.max(...values);
-    return {
-      min,
-      max,
-      range: Math.max(max - min, 1),
-      values,
-    };
-  }, [points]);
+    const average = values.reduce((total, value) => total + value, 0) / values.length;
+
+    return [
+      { label: 'Latest', value: String(latest) },
+      { label: 'Min', value: String(min) },
+      { label: 'Max', value: String(max) },
+      { label: 'Average', value: average.toFixed(1) },
+    ];
+  }, [series]);
+
+  const recentRows = useMemo(() => series.slice(0, 5), [series]);
 
   const handleNavPress = (key: NavKey) => {
-    if (key === 'home') {
-      router.push('/home');
-      return;
+    if (key !== 'analytics') {
+      router.push(`/${key}`);
     }
-    if (key === 'analytics') {
-      router.push('/analytics');
-      return;
-    }
-    router.push('/devices');
   };
 
   const renderSidebar = () => (
@@ -175,14 +300,14 @@ export default function AnalyticsScreen() {
 
         <View style={styles.navList}>
           {sidebarItems.map((item) => {
-            const isActive = item.key === activeNav;
+            const isActive = item.key === 'analytics';
             return (
               <Pressable
                 key={item.key}
                 onPress={() => handleNavPress(item.key)}
                 style={[styles.navItem, isActive && styles.navItemActive]}
               >
-                <Feather name={item.icon} size={20} color={isActive ? '#ffffff' : '#111111'} />
+                <Feather name={item.icon} size={26} color={TEXT_PRIMARY} />
                 <Text style={[styles.navText, isActive && styles.navTextActive]}>{item.label}</Text>
               </Pressable>
             );
@@ -194,149 +319,220 @@ export default function AnalyticsScreen() {
     </View>
   );
 
-  const renderMobileNav = () => (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.mobileNav}
-    >
-      {sidebarItems.map((item) => {
-        const isActive = item.key === activeNav;
-        return (
-          <Pressable
-            key={item.key}
-            onPress={() => handleNavPress(item.key)}
-            style={[styles.mobileNavItem, isActive && styles.mobileNavItemActive]}
-          >
-            <Feather name={item.icon} size={16} color={isActive ? '#ffffff' : '#111111'} />
-            <Text style={[styles.mobileNavText, isActive && styles.mobileNavTextActive]}>
-              {item.label}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </ScrollView>
-  );
-
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.page}>
         {isDesktop ? renderSidebar() : null}
 
         <View style={styles.mainArea}>
-          <View style={styles.topBar}>
-            <Text style={styles.pageTitle}>{pageTitle}</Text>
-            <View style={styles.timeWrap}>
-              <Text style={styles.timeText}>
-                {clock.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+          <View style={[styles.topBar, !isDesktop && styles.mobileTopBar]}>
+            <View style={!isDesktop ? styles.mobileTitleWrap : undefined}>
+              <Text style={[styles.pageTitle, !isDesktop && styles.mobilePageTitle]}>
+                {isDesktop ? pageTitle : 'Analytics'}
               </Text>
-              <Text style={styles.dateText}>
-                {clock.toLocaleDateString(undefined, {
-                  day: '2-digit',
-                  month: '2-digit',
-                  year: '2-digit',
-                })}
-              </Text>
+              {!isDesktop ? (
+                <Text style={styles.headerSubText}>{TAB_LABELS[activeTab]}</Text>
+              ) : null}
+            </View>
+
+            <View style={styles.topBarRight}>
+              <MobileHeaderMenu
+                userName={userName}
+                userEmail={userEmail}
+                onLogout={async () => {
+                  await clearTokens();
+                  router.replace('/');
+                }}
+              />
             </View>
           </View>
 
-          {!isDesktop ? renderMobileNav() : null}
-
           <ScrollView
             style={styles.container}
-            contentContainerStyle={styles.content}
-            showsVerticalScrollIndicator={false}
+            contentContainerStyle={[styles.content, isDesktop && styles.contentDesktop]}
           >
+            {loading ? <ActivityIndicator size="large" color={ACCENT} /> : null}
             {errorMessage ? <Text style={styles.errorBanner}>{errorMessage}</Text> : null}
-            <Text style={styles.introText}>Live telemetry overview for your smart farm.</Text>
 
-            <View style={styles.panel}>
-              <View style={styles.tabsContainer}>
-                {TABS.map((tab, index) => {
-                  const isActive = activeTab === tab.value;
+            {!isDesktop ? (
+              <View style={styles.mobileSummaryGrid}>
+                {summaryItems.map((item) => (
+                  <View key={item.label} style={styles.mobileSummaryCard}>
+                    <Text style={styles.summaryLabel}>{item.label}</Text>
+                    <Text style={styles.summaryValue}>{item.value}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+
+            <View
+              style={[styles.panel, !isDesktop && styles.panelCompact]}
+              accessibilityLabel={`Telemetry chart with ${stats.length} dashboard stats loaded`}
+            >
+              <ScrollView
+                horizontal={!isDesktop}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={[styles.tabWrap, !isDesktop && styles.mobileTabWrap]}
+              >
+                {(Object.keys(TAB_LABELS) as AnalyticsTab[]).map((tab) => {
+                  const active = activeTab === tab;
                   return (
                     <Pressable
-                      key={tab.value}
-                      onPress={() => setActiveTab(tab.value)}
+                      key={tab}
+                      onPress={() => setActiveTab(tab)}
                       style={[
                         styles.tab,
-                        index === 0 && styles.firstTab,
-                        index === TABS.length - 1 && styles.lastTab,
-                        isActive && styles.activeTab,
+                        !isDesktop && styles.mobileTab,
+                        active && styles.tabActive,
                       ]}
                     >
-                      <Text style={[styles.tabText, isActive && styles.activeTabText]}>
-                        {tab.label}
+                      <Text style={[styles.tabText, active && styles.tabTextActive]}>
+                        {TAB_LABELS[tab]}
                       </Text>
                     </Pressable>
                   );
                 })}
+              </ScrollView>
+
+              <View style={[styles.chartArea, !isDesktop && styles.mobileChartArea]}>
+                <View style={[styles.yAxis, !isDesktop && styles.mobileYAxis]}>
+                  {yTicks.map((tick) => (
+                    <Text key={tick} style={[styles.axisText, !isDesktop && styles.mobileAxisText]}>
+                      {formatTick(tick)}
+                    </Text>
+                  ))}
+                </View>
+
+                <View style={styles.chartColumn}>
+                  <View
+                    style={[styles.plotArea, !isDesktop && styles.mobilePlotArea]}
+                    onLayout={(event) => {
+                      const { width: nextWidth, height: nextHeight } = event.nativeEvent.layout;
+                      setPlotSize((current) =>
+                        current.width === nextWidth && current.height === nextHeight
+                          ? current
+                          : { width: nextWidth, height: nextHeight }
+                      );
+                    }}
+                  >
+                    {yTicks.map((tick, index) => (
+                      <View
+                        key={`h-${tick}`}
+                        style={[styles.horizontalGrid, { top: `${(index / 4) * 100}%` }]}
+                      />
+                    ))}
+
+                    {verticalGridLines.map((label, index) => (
+                      <View
+                        key={`v-${label}`}
+                        style={[
+                          styles.verticalGrid,
+                          {
+                            left: `${
+                              verticalGridLines.length === 1
+                                ? 0
+                                : (index / (verticalGridLines.length - 1)) * 100
+                            }%`,
+                          },
+                        ]}
+                      />
+                    ))}
+
+                    {chartPoints.length > 0 ? (
+                      <Svg
+                        style={StyleSheet.absoluteFill}
+                        width="100%"
+                        height="100%"
+                        pointerEvents="none"
+                      >
+                        <Defs>
+                          <LinearGradient id="chartFill" x1="0" y1="0" x2="0" y2="1">
+                            <Stop offset="0" stopColor={CHART_LINE} stopOpacity={0.24} />
+                            <Stop offset="1" stopColor={CHART_LINE} stopOpacity={0.02} />
+                          </LinearGradient>
+                        </Defs>
+
+                        {chartAreaPath ? <Path d={chartAreaPath} fill="url(#chartFill)" /> : null}
+
+                        {chartPath ? (
+                          <Path
+                            d={chartPath}
+                            fill="none"
+                            stroke={CHART_LINE}
+                            strokeWidth={!isDesktop ? 3.5 : 3}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        ) : null}
+
+                        {chartPoints.map((point) => (
+                          <Circle
+                            key={point.id}
+                            cx={point.x}
+                            cy={point.y}
+                            r={!isDesktop ? 4 : 3.5}
+                            fill={PANEL_BG}
+                            stroke={CHART_LINE}
+                            strokeWidth={2.5}
+                          />
+                        ))}
+                      </Svg>
+                    ) : null}
+
+                    {chartLoading ? (
+                      <View style={styles.chartOverlay}>
+                        <ActivityIndicator size="small" color={ACCENT} />
+                      </View>
+                    ) : null}
+
+                    {!chartLoading && chartRows.length === 0 ? (
+                      <View style={styles.chartOverlay}>
+                        <Text style={styles.emptyText}>No telemetry history available.</Text>
+                      </View>
+                    ) : null}
+                  </View>
+
+                  <View style={styles.xAxis}>
+                    {xLabels.map((label, index) => {
+                      const shouldShowLabel =
+                        isDesktop || index === 0 || index === xLabels.length - 1 || index % 2 === 0;
+
+                      return (
+                        <Text
+                          key={`x-${label}-${index}`}
+                          style={[styles.axisText, !isDesktop && styles.mobileAxisText]}
+                        >
+                          {shouldShowLabel ? label : ''}
+                        </Text>
+                      );
+                    })}
+                  </View>
+                </View>
               </View>
-
-              {loading && points.length === 0 ? (
-                <View style={styles.loadingWrap}>
-                  <ActivityIndicator size="large" color="#22c55e" />
-                </View>
-              ) : !loading && points.length === 0 ? (
-                <View style={styles.loadingWrap}>
-                  <Text style={styles.emptyText}>
-                    No telemetry samples available for this sensor yet.
-                  </Text>
-                </View>
-              ) : (
-                <View style={styles.chartSection}>
-                  <View style={[styles.gridFrame, { width: chartWidth }]}>
-                    <View style={styles.gridLines}>
-                      {[0, 1, 2, 3, 4].map((line) => (
-                        <View key={line} style={styles.gridLine} />
-                      ))}
-                    </View>
-                    <View style={styles.columnsRow}>
-                      {(points.length
-                        ? points
-                        : [
-                            {
-                              id: 'empty',
-                              numericValue: 0,
-                              receivedAt: new Date().toISOString(),
-                            },
-                          ]
-                      ).map((point) => {
-                        const height =
-                          ((point.numericValue - chartMeta.min) / chartMeta.range) * 180 + 22;
-                        return (
-                          <View key={point.id} style={styles.columnWrap}>
-                            <View style={[styles.column, { height }]} />
-                            <Text style={styles.valueLabel}>{point.numericValue}</Text>
-                            <Text style={styles.timeLabel}>
-                              {formatTimeLabel(point.receivedAt)}
-                            </Text>
-                          </View>
-                        );
-                      })}
-                    </View>
-                  </View>
-
-                  <View style={styles.summaryRow}>
-                    <View style={styles.summaryCard}>
-                      <Text style={styles.summaryLabel}>Min</Text>
-                      <Text style={styles.summaryValue}>{chartMeta.min}</Text>
-                    </View>
-                    <View style={styles.summaryCard}>
-                      <Text style={styles.summaryLabel}>Max</Text>
-                      <Text style={styles.summaryValue}>{chartMeta.max}</Text>
-                    </View>
-                    <View style={styles.summaryCard}>
-                      <Text style={styles.summaryLabel}>Samples</Text>
-                      <Text style={styles.summaryValue}>{points.length || 1}</Text>
-                    </View>
-                  </View>
-                </View>
-              )}
             </View>
+
+            {!isDesktop ? (
+              <View style={styles.recentPanel}>
+                <Text style={styles.sectionTitle}>Recent readings</Text>
+                {recentRows.length === 0 ? (
+                  <Text style={styles.emptyText}>No telemetry history available.</Text>
+                ) : (
+                  recentRows.map((item) => (
+                    <View key={item.id} style={styles.readingRow}>
+                      <View>
+                        <Text style={styles.readingValue}>{item.numericValue}</Text>
+                        <Text style={styles.readingLabel}>{TAB_LABELS[activeTab]}</Text>
+                      </View>
+                      <Text style={styles.readingTime}>{formatReadingTime(item.receivedAt)}</Text>
+                    </View>
+                  ))
+                )}
+              </View>
+            ) : null}
           </ScrollView>
         </View>
       </View>
+      {!isDesktop ? <BottomNav activeKey="analytics" /> : null}
     </SafeAreaView>
   );
 }
@@ -352,277 +548,384 @@ const styles = StyleSheet.create({
     backgroundColor: PAGE_BG,
   },
   sidebar: {
-    width: 176,
-    backgroundColor: '#ffffff',
+    width: 240,
+    backgroundColor: PANEL_BG,
     borderRightWidth: 1,
-    borderRightColor: '#d5d5d5',
+    borderRightColor: PANEL_BORDER,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
     justifyContent: 'space-between',
   },
   brandRow: {
-    height: 70,
+    height: 94,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
-    gap: 10,
+    gap: 14,
+    paddingHorizontal: 16,
   },
   brandLogo: {
-    width: 38,
-    height: 38,
+    width: 48,
+    height: 48,
   },
   brandText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#111111',
+    fontSize: 26,
+    fontWeight: '800',
+    color: TEXT_PRIMARY,
   },
   sidebarDivider: {
     height: 1,
-    backgroundColor: '#d5d5d5',
+    backgroundColor: PANEL_BORDER,
   },
   navList: {
-    paddingTop: 54,
+    marginTop: 66,
   },
   navItem: {
-    height: 46,
+    height: 64,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
-    paddingHorizontal: 10,
+    gap: 20,
+    borderRadius: 0,
+    paddingHorizontal: 16,
   },
   navItemActive: {
     backgroundColor: ACCENT_GREEN,
   },
   navText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#111111',
+    fontSize: 20,
+    fontWeight: '700',
+    color: TEXT_PRIMARY,
   },
   navTextActive: {
-    fontWeight: '700',
-    color: '#ffffff',
+    color: TEXT_PRIMARY,
   },
   mainArea: {
     flex: 1,
   },
   topBar: {
-    minHeight: 52,
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    backgroundColor: '#ffffff',
+    height: 64,
+    paddingHorizontal: 56,
+    backgroundColor: PANEL_BG,
     borderBottomWidth: 1,
-    borderBottomColor: '#d5d5d5',
+    borderBottomColor: PANEL_BORDER,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 2,
+  },
+  mobileTopBar: {
+    height: 'auto',
+    minHeight: 84,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    alignItems: 'flex-start',
+  },
+  mobileTitleWrap: {
+    flex: 1,
+    gap: 2,
   },
   pageTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: TEXT_PRIMARY,
+  },
+  mobilePageTitle: {
+    fontSize: 28,
+    fontWeight: '800',
+  },
+  headerSubText: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#111111',
+    color: TEXT_SECONDARY,
   },
   timeWrap: {
     alignItems: 'flex-end',
   },
+  mobileTimeWrap: {
+    paddingTop: 3,
+  },
   timeText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#111111',
+    fontSize: 18,
+    fontWeight: '800',
+    color: TEXT_PRIMARY,
   },
   dateText: {
     marginTop: 2,
-    fontSize: 11,
-    color: '#505050',
+    fontSize: 16,
+    color: TEXT_SECONDARY,
   },
   mobileNav: {
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 10,
-    backgroundColor: PAGE_BG,
-    borderBottomWidth: 1,
-    borderBottomColor: '#d5d5d5',
+    paddingTop: 4,
+    paddingBottom: 12,
+    gap: 8,
   },
   mobileNavItem: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
+    minHeight: 42,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: '#ffffff',
-    borderWidth: 1,
-    borderColor: '#d9d9d9',
   },
   mobileNavItemActive: {
     backgroundColor: ACCENT_GREEN,
+    borderColor: ACCENT_GREEN,
   },
   mobileNavText: {
     fontSize: 13,
-    fontWeight: '600',
-    color: '#111111',
+    fontWeight: '700',
+    color: TEXT_PRIMARY,
   },
   mobileNavTextActive: {
-    color: '#ffffff',
+    color: TEXT_PRIMARY,
   },
   container: {
     flex: 1,
   },
   content: {
-    paddingHorizontal: 20,
-    paddingTop: 36,
-    paddingBottom: 28,
+    paddingHorizontal: 16,
+    paddingTop: 18,
+    paddingBottom: 36,
+    gap: 18,
   },
-  introText: {
+  contentDesktop: {
+    paddingHorizontal: 32,
+    paddingTop: 150,
+  },
+  errorBanner: {
+    borderRadius: 16,
+    backgroundColor: ERROR_BG,
+    color: ERROR_TEXT,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     fontSize: 14,
-    color: '#505050',
-    marginBottom: 18,
+    fontWeight: '700',
   },
-  panel: {
-    backgroundColor: CARD_BG,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#e8e8e8',
-    padding: 20,
+  mobileSummaryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  mobileSummaryCard: {
+    width: '48%',
+    minHeight: 94,
+    borderRadius: 18,
+    backgroundColor: PANEL_BG,
+    padding: 14,
+    justifyContent: 'space-between',
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
+    shadowOpacity: 0.08,
     shadowRadius: 10,
-    elevation: 3,
-  },
-  tabsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginBottom: 24,
-  },
-  tab: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderWidth: 1,
-    borderColor: BORDER,
-    backgroundColor: '#f1f3f4',
-    borderRightWidth: 0,
-  },
-  firstTab: {
-    borderTopLeftRadius: 10,
-    borderBottomLeftRadius: 10,
-  },
-  lastTab: {
-    borderTopRightRadius: 10,
-    borderBottomRightRadius: 10,
-    borderRightWidth: 1,
-  },
-  activeTab: {
-    backgroundColor: ACTIVE,
-    borderColor: ACTIVE,
-    borderRightWidth: 1,
-  },
-  tabText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#374151',
-  },
-  activeTabText: {
-    color: '#093814',
-  },
-  loadingWrap: {
-    minHeight: 320,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyText: {
-    fontSize: 14,
-    color: '#6b7280',
-    textAlign: 'center',
-  },
-  chartSection: {
-    gap: 24,
-  },
-  gridFrame: {
-    alignSelf: 'center',
-    minHeight: 280,
-    borderWidth: 1,
-    borderColor: '#eef1f2',
-    borderRadius: 10,
-    paddingHorizontal: 18,
-    paddingTop: 18,
-    paddingBottom: 12,
-    backgroundColor: '#fbfcfc',
-    overflow: 'hidden',
-  },
-  gridLines: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'space-between',
-    paddingVertical: 22,
-    paddingHorizontal: 18,
-  },
-  gridLine: {
-    height: 1,
-    backgroundColor: '#ebeff0',
-  },
-  columnsRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    gap: 10,
-    minHeight: 220,
-  },
-  columnWrap: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 8,
-  },
-  column: {
-    width: '100%',
-    maxWidth: 40,
-    borderRadius: 999,
-    backgroundColor: '#c8b464',
-    minHeight: 22,
-  },
-  valueLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#2e403c',
-  },
-  timeLabel: {
-    fontSize: 11,
-    color: '#738789',
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 14,
-  },
-  summaryCard: {
-    flex: 1,
-    minWidth: 120,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#edf1ef',
-    backgroundColor: '#f8fbf8',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    elevation: 1,
   },
   summaryLabel: {
     fontSize: 13,
-    color: '#6c8182',
+    fontWeight: '700',
+    color: TEXT_SECONDARY,
   },
   summaryValue: {
-    marginTop: 6,
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: '800',
-    color: '#11261f',
+    color: TEXT_PRIMARY,
   },
-  errorBanner: {
-    marginBottom: 16,
-    borderRadius: 10,
-    backgroundColor: '#fee2e2',
-    color: '#991b1b',
+  panel: {
+    width: '100%',
+    maxWidth: 1134,
+    minHeight: 486,
+    backgroundColor: PANEL_BG,
+    borderWidth: 1,
+    borderColor: '#d7d7d7',
+    paddingTop: 28,
+    paddingHorizontal: 52,
+    paddingBottom: 28,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  panelCompact: {
+    minHeight: 370,
+    borderRadius: 24,
+    borderWidth: 0,
+    paddingTop: 16,
+    paddingHorizontal: 14,
+    paddingBottom: 18,
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    elevation: 2,
+  },
+  tabWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+  },
+  mobileTabWrap: {
+    flexWrap: 'nowrap',
+    gap: 8,
+    paddingRight: 4,
+  },
+  tab: {
+    width: 120,
+    height: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#a8a8a8',
+    backgroundColor: '#e6e6e6',
+  },
+  mobileTab: {
+    width: 'auto',
+    minWidth: 112,
+    height: 44,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    borderColor: '#d8d8d8',
+    backgroundColor: '#f3f3f3',
+  },
+  tabActive: {
+    backgroundColor: ACCENT_GREEN,
+    borderColor: ACCENT_GREEN,
+  },
+  tabText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: TEXT_PRIMARY,
+  },
+  tabTextActive: {
+    color: TEXT_PRIMARY,
+  },
+  chartArea: {
+    marginTop: 56,
+    flexDirection: 'row',
+    minHeight: 316,
+  },
+  mobileChartArea: {
+    marginTop: 22,
+    minHeight: 252,
+  },
+  yAxis: {
+    width: 44,
+    height: 266,
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+    paddingRight: 14,
+  },
+  mobileYAxis: {
+    width: 34,
+    height: 216,
+    paddingRight: 8,
+  },
+  chartColumn: {
+    flex: 1,
+    minWidth: 0,
+  },
+  plotArea: {
+    height: 266,
+    borderLeftWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: '#d7d7d7',
+    borderRadius: 18,
+    backgroundColor: '#fbfbfb',
+    overflow: 'hidden',
+  },
+  mobilePlotArea: {
+    height: 216,
+    borderRadius: 20,
+  },
+  horizontalGrid: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 1,
+    backgroundColor: '#ececec',
+  },
+  verticalGrid: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: 1,
+    backgroundColor: '#f0f0f0',
+  },
+  lineSegment: {
+    position: 'absolute',
+    height: 1,
+    backgroundColor: CHART_LINE,
+  },
+  chartOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.62)',
+  },
+  xAxis: {
+    height: 38,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: 12,
+  },
+  axisText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: TEXT_SECONDARY,
+  },
+  mobileAxisText: {
+    fontSize: 11,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: TEXT_SECONDARY,
+  },
+  recentPanel: {
+    borderRadius: 22,
+    backgroundColor: PANEL_BG,
+    padding: 16,
+    gap: 10,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 1,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: TEXT_PRIMARY,
+    marginBottom: 2,
+  },
+  readingRow: {
+    minHeight: 58,
+    borderRadius: 16,
+    backgroundColor: '#f8f8f8',
     paddingHorizontal: 14,
     paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+  },
+  readingValue: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: TEXT_PRIMARY,
+  },
+  readingLabel: {
+    marginTop: 2,
+    fontSize: 12,
+    color: TEXT_SECONDARY,
+  },
+  readingTime: {
     fontSize: 13,
+    fontWeight: '700',
+    color: TEXT_SECONDARY,
+  },
+  topBarRight: {
+    paddingTop: 12,
+    justifyContent: 'center',
+    alignItems: 'flex-end',
   },
 });

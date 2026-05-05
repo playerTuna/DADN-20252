@@ -18,7 +18,7 @@ export class CommandLogService {
     issuedAt: Date;
     idempotencyKey?: string;
     userId?: string;
-    source?: "manual" | "automation";
+    source?: 'manual' | 'automation';
   }) {
     return this.commandLogModel.create({
       commandId: params.commandId,
@@ -57,7 +57,7 @@ export class CommandLogService {
             ackedAt,
           },
         },
-        { new: true }
+        { returnDocument: 'after' }
       )
       .lean()
       .exec();
@@ -77,7 +77,7 @@ export class CommandLogService {
             error: 'Command timed out waiting for hardware ACK',
           },
         },
-        { new: true }
+        { returnDocument: 'after' }
       )
       .lean()
       .exec();

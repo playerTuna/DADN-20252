@@ -9,6 +9,8 @@
   "scripts": {
     "dev:frontend": "npm --workspace smart-home run start",
     "web:frontend": "npm --workspace smart-home run web",
+    "dev:web": "npm --workspace @yolo-farm/web run dev",
+    "build:web": "npm --workspace @yolo-farm/web run build",
     "dev:backend": "npm --workspace @yolo-farm/backend run start:dev",
     "build:backend": "npm --workspace @yolo-farm/backend run build",
     "start:backend": "npm --workspace @yolo-farm/backend run start:prod"
@@ -18,6 +20,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "core-js-compat": "^3.49.0"
+    "core-js-compat": "^3.49.0",
+    "react-native-svg": "15.12.1"
   }
 }

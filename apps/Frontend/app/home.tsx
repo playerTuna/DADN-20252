@@ -1,3 +1,5 @@
+import { MobileHeaderMenu } from '../components/MobileHeaderMenu';
+import { BottomNav } from '../components/BottomNav';
 import { Feather, FontAwesome6, Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
@@ -12,31 +14,29 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-
 import { Toggle } from '../components/Toggle';
 import { UserMenu } from '../components/UserMenu';
 import { sidebarItems } from '../constants/navigation';
 import {
   getAlertsLive,
   getDashboard,
-  getFeatures,
   getManagedDevices,
   getQuickStatsLive,
   getUser,
   toggleManagedDeviceAutoMode,
-  type ManagedDevice,
   updateManagedDevicePower,
+  type ManagedDevice,
 } from '../services/api';
-import { getTokens } from '../services/auth';
+import { clearTokens, getTokens } from '../services/auth';
 import type { DashboardData, NavKey } from '../types/dashboard';
 
 const PAGE_BG = '#e5e5e5';
 const PANEL_BG = '#ffffff';
-const PANEL_BORDER = '#d4d4d4';
-const ACCENT = '#2f37ff';
-const ACCENT_GREEN = '#22ff66';
-const TEXT_PRIMARY = '#111111';
-const TEXT_SECONDARY = '#5f5f5f';
+const PANEL_BORDER = '#d2d2d2';
+const ACCENT = '#160f9b';
+const ACCENT_GREEN = '#28f464';
+const TEXT_PRIMARY = '#050505';
+const TEXT_SECONDARY = '#555555';
 const ERROR_BG = '#ffe4e6';
 const ERROR_TEXT = '#be123c';
 
@@ -97,14 +97,23 @@ function mapDevicesToControls(devices: ManagedDevice[]): HomeControlItem[] {
   }));
 }
 
+function displayHomeTitle(title?: string) {
+  if (!title || title === 'Home - Dashboards') {
+    return 'Home';
+  }
+  return title;
+}
+
 export default function HomeScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
 
   const isDesktop = width >= 960;
   const isTablet = width >= 640;
-  const statsPerRow = isDesktop ? 4 : isTablet ? 2 : 1;
-  const statWidth = `${100 / statsPerRow - (statsPerRow > 1 ? 2 : 0)}%` as const;
+  const statsPerRow = isDesktop ? 4 : 2;
+  const statWidth = isDesktop
+    ? 172
+    : (`${100 / statsPerRow - (statsPerRow > 1 ? 2 : 0)}%` as const);
 
   const [dashboard, setDashboard] = useState<Record<NavKey, DashboardData> | null>(null);
   const [managedDevices, setManagedDevices] = useState<ManagedDevice[]>([]);
@@ -174,7 +183,10 @@ export default function HomeScreen() {
         setUserName(profile.displayName || 'User');
         setUserEmail(profile.email);
 
-        await Promise.allSettled([refreshLiveHome(), refreshManagedDevices(), getFeatures()]);
+        await Promise.allSettled([refreshLiveHome(), refreshManagedDevices()]);
+        if (!cancelled) {
+          setErrorMessage(null);
+        }
       } catch (error) {
         console.log('Initial home load failed', error);
         if (!cancelled) {
@@ -291,6 +303,7 @@ export default function HomeScreen() {
 
   const alertPageItems = paginationItems(safeAlertPage, totalAlertPages);
   const controlPageItems = paginationItems(safeControlPage, totalControlPages);
+
   const handleNavPress = (key: NavKey) => {
     if (key === 'analytics' || key === 'devices') {
       router.push(`/${key}`);
@@ -321,7 +334,7 @@ export default function HomeScreen() {
                 onPress={() => handleNavPress(item.key)}
                 style={[styles.navItem, isActive && styles.navItemActive]}
               >
-                <Feather name={item.icon} size={20} color={isActive ? '#ffffff' : TEXT_PRIMARY} />
+                <Feather name={item.icon} size={22} color={TEXT_PRIMARY} />
                 <Text style={[styles.navText, isActive && styles.navTextActive]}>{item.label}</Text>
               </Pressable>
             );
@@ -333,80 +346,66 @@ export default function HomeScreen() {
     </View>
   );
 
-  const renderMobileNav = () => (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.mobileNav}
-    >
-      {sidebarItems.map((item) => {
-        const isActive = item.key === 'home';
-        return (
-          <Pressable
-            key={item.key}
-            onPress={() => handleNavPress(item.key)}
-            style={[styles.mobileNavItem, isActive && styles.mobileNavItemActive]}
-          >
-            <Feather name={item.icon} size={16} color={isActive ? '#ffffff' : TEXT_PRIMARY} />
-            <Text style={[styles.mobileNavText, isActive && styles.mobileNavTextActive]}>
-              {item.label}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </ScrollView>
-  );
-
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.page}>
         {isDesktop ? renderSidebar() : null}
 
         <View style={styles.mainArea}>
-          <View style={styles.topBar}>
-            <View style={styles.topBarTitleRow}>
-              <Text style={styles.pageTitle}>{activeData.title}</Text>
+          <View style={[styles.topBar, !isDesktop && styles.mobileTopBar]}>
+            <View style={[styles.topBarTitleRow, !isDesktop && styles.mobileTitleWrap]}>
+              <Text style={[styles.pageTitle, !isDesktop && styles.mobilePageTitle]}>
+                {displayHomeTitle(activeData.title)}
+              </Text>
+              {!isDesktop ? <Text style={styles.headerGreeting}>Hi, {userName}</Text> : null}
               {bootstrapPending ? <ActivityIndicator size="small" color={ACCENT} /> : null}
             </View>
 
-            <View style={styles.timeWrap}>
-              <Text style={styles.timeText}>
-                {clock.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
-              </Text>
-              <Text style={styles.dateText}>
-                {clock.toLocaleDateString(undefined, {
-                  day: '2-digit',
-                  month: '2-digit',
-                  year: '2-digit',
-                })}
-              </Text>
+            <View style={styles.topBarRight}>
+              <MobileHeaderMenu
+                userName={userName}
+                userEmail={userEmail}
+                onLogout={async () => {
+                  await clearTokens();
+                  router.replace('/');
+                }}
+              />
             </View>
           </View>
 
-          {!isDesktop ? renderMobileNav() : null}
-
-          <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+          <ScrollView
+            style={styles.container}
+            contentContainerStyle={[styles.content, isDesktop && styles.contentDesktop]}
+          >
             {errorMessage ? <Text style={styles.errorBanner}>{errorMessage}</Text> : null}
 
             <Text style={styles.sectionTitle}>Quick Stats</Text>
-            <View style={styles.statsGrid}>
+            <View style={[styles.statsGrid, !isDesktop && styles.mobileStatsGrid]}>
               {activeData.stats.map((item) => (
-                <View key={item.label} style={[styles.statCard, { width: statWidth }]}>
+                <View
+                  key={item.label}
+                  style={[
+                    styles.statCard,
+                    !isDesktop && styles.mobileStatCard,
+                    { width: statWidth },
+                  ]}
+                >
                   <Text style={styles.statLabel}>{item.label}</Text>
-                  <Ionicons name={item.icon as never} size={46} color={TEXT_PRIMARY} />
+                  <Ionicons
+                    name={item.icon as never}
+                    size={isDesktop ? 46 : 32}
+                    color={TEXT_PRIMARY}
+                  />
                   <Text style={styles.statValue}>{item.value}</Text>
                 </View>
               ))}
             </View>
 
             <View style={[styles.sectionRow, !isTablet && styles.sectionRowStack]}>
-              <View style={styles.leftColumn}>
+              <View style={[styles.leftColumn, !isTablet && styles.columnFull]}>
                 <Text style={styles.sectionTitle}>Quick Control</Text>
-                <Text style={styles.helperNote}>
-                  Power toggle sends command API. Mode toggle updates device automation mode.
-                </Text>
 
-                <View style={styles.panel}>
+                <View style={[styles.panel, !isDesktop && styles.mobilePanel]}>
                   {pagedControls.length === 0 ? (
                     <Text style={styles.emptyText}>No managed devices available.</Text>
                   ) : null}
@@ -416,26 +415,25 @@ export default function HomeScreen() {
                       key={item.id}
                       style={[
                         styles.controlRow,
-                        index !== pagedControls.length - 1 && styles.rowDivider,
+                        !isDesktop && styles.mobileControlRow,
+                        isDesktop && index !== pagedControls.length - 1 && styles.rowDivider,
                       ]}
                     >
                       <View style={styles.controlLeft}>
-                        <View style={styles.deviceIcon}>
+                        <View style={[styles.deviceIcon, !isDesktop && styles.mobileDeviceIcon]}>
                           <DeviceIcon type={item.type} />
                         </View>
 
                         <View style={styles.controlTextWrap}>
-                          <Text style={styles.controlNameLine}>
-                            <Text style={styles.controlName}>{item.name}</Text>
-                            <Text style={styles.controlStateInline}> {item.state}</Text>
-                          </Text>
+                          <Text style={styles.controlName}>{item.name}</Text>
+                          <Text style={styles.controlStateInline}>{item.state}</Text>
                         </View>
                       </View>
 
                       <Pressable
                         onPress={() => void handleDeviceMode(item.id)}
                         disabled={bootstrapPending || pendingModeId === item.id}
-                        style={styles.modeButton}
+                        style={[styles.modeButton, !isDesktop && styles.mobileModeButton]}
                       >
                         <Text style={styles.controlMode}>
                           {pendingModeId === item.id ? 'updating...' : item.mode}
@@ -485,10 +483,10 @@ export default function HomeScreen() {
                 </View>
               </View>
 
-              <View style={styles.rightColumn}>
+              <View style={[styles.rightColumn, !isTablet && styles.columnFull]}>
                 <Text style={styles.sectionTitle}>Alert log</Text>
 
-                <View style={styles.panel}>
+                <View style={[styles.panel, !isDesktop && styles.mobilePanel]}>
                   {pagedAlerts.length === 0 ? (
                     <Text style={styles.emptyText}>No alerts yet.</Text>
                   ) : null}
@@ -498,7 +496,8 @@ export default function HomeScreen() {
                       key={item.id}
                       style={[
                         styles.alertRow,
-                        index !== pagedAlerts.length - 1 && styles.rowDivider,
+                        !isDesktop && styles.mobileAlertRow,
+                        isDesktop && index !== pagedAlerts.length - 1 && styles.rowDivider,
                       ]}
                     >
                       <Text style={styles.alertText}>{item.text}</Text>
@@ -541,6 +540,7 @@ export default function HomeScreen() {
           </ScrollView>
         </View>
       </View>
+      {!isDesktop ? <BottomNav activeKey="home" /> : null}
     </SafeAreaView>
   );
 }
@@ -560,91 +560,120 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   sidebar: {
-    width: 270,
+    width: 240,
     backgroundColor: PANEL_BG,
     borderRightWidth: 1,
     borderRightColor: PANEL_BORDER,
-    paddingHorizontal: 18,
-    paddingVertical: 18,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
     justifyContent: 'space-between',
   },
   brandRow: {
+    height: 94,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 14,
+    paddingHorizontal: 16,
   },
   brandLogo: {
-    width: 34,
-    height: 34,
+    width: 48,
+    height: 48,
   },
   brandText: {
-    fontSize: 22,
+    fontSize: 26,
     fontWeight: '800',
     color: TEXT_PRIMARY,
   },
   sidebarDivider: {
     height: 1,
     backgroundColor: PANEL_BORDER,
-    marginVertical: 18,
   },
   navList: {
-    gap: 10,
+    marginTop: 66,
   },
   navItem: {
+    height: 64,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    gap: 20,
+    borderRadius: 0,
+    paddingHorizontal: 16,
   },
   navItemActive: {
-    backgroundColor: ACCENT,
+    backgroundColor: ACCENT_GREEN,
   },
   navText: {
-    fontSize: 15,
+    fontSize: 18,
     fontWeight: '700',
     color: TEXT_PRIMARY,
   },
   navTextActive: {
-    color: '#ffffff',
+    color: TEXT_PRIMARY,
   },
   mainArea: {
     flex: 1,
   },
   topBar: {
-    paddingHorizontal: 18,
-    paddingVertical: 16,
+    height: 64,
+    paddingHorizontal: 40,
+    backgroundColor: PANEL_BG,
+    borderBottomWidth: 1,
+    borderBottomColor: PANEL_BORDER,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  mobileTopBar: {
+    height: 'auto',
+    minHeight: 84,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    alignItems: 'flex-start',
   },
   topBarTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
   },
+  mobileTitleWrap: {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 2,
+    flex: 1,
+  },
   pageTitle: {
-    fontSize: 30,
-    fontWeight: '800',
+    fontSize: 20,
+    fontWeight: '700',
     color: TEXT_PRIMARY,
+  },
+  mobilePageTitle: {
+    fontSize: 28,
+    fontWeight: '800',
+  },
+  headerGreeting: {
+    fontSize: 14,
+    color: TEXT_SECONDARY,
   },
   timeWrap: {
     alignItems: 'flex-end',
   },
+  mobileTimeWrap: {
+    paddingTop: 3,
+  },
   timeText: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '800',
     color: TEXT_PRIMARY,
   },
   dateText: {
-    marginTop: 4,
+    marginTop: 2,
     fontSize: 14,
     color: TEXT_SECONDARY,
   },
   mobileNav: {
     paddingHorizontal: 16,
-    paddingBottom: 6,
+    paddingTop: 4,
+    paddingBottom: 12,
     gap: 8,
   },
   mobileNavItem: {
@@ -655,12 +684,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: PANEL_BORDER,
     backgroundColor: PANEL_BG,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    minHeight: 42,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
   mobileNavItemActive: {
-    backgroundColor: ACCENT,
-    borderColor: ACCENT,
+    backgroundColor: ACCENT_GREEN,
+    borderColor: ACCENT_GREEN,
   },
   mobileNavText: {
     fontSize: 13,
@@ -668,18 +698,22 @@ const styles = StyleSheet.create({
     color: TEXT_PRIMARY,
   },
   mobileNavTextActive: {
-    color: '#ffffff',
+    color: TEXT_PRIMARY,
   },
   container: {
     flex: 1,
   },
   content: {
     paddingHorizontal: 18,
-    paddingBottom: 28,
+    paddingBottom: 96,
     gap: 18,
   },
+  contentDesktop: {
+    paddingHorizontal: 48,
+    paddingTop: 40,
+  },
   errorBanner: {
-    borderRadius: 14,
+    borderRadius: 4,
     backgroundColor: ERROR_BG,
     color: ERROR_TEXT,
     paddingHorizontal: 14,
@@ -688,76 +722,123 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   sectionTitle: {
-    fontSize: 24,
+    paddingTop: 12,
+    fontSize: 18,
     fontWeight: '800',
     color: TEXT_PRIMARY,
-    marginBottom: 8,
-  },
-  helperNote: {
-    marginTop: -4,
-    marginBottom: 10,
-    fontSize: 13,
-    color: TEXT_SECONDARY,
+    marginBottom: 12,
   },
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    gap: 36,
+  },
+  mobileStatsGrid: {
     justifyContent: 'space-between',
     gap: 12,
   },
   statCard: {
-    minWidth: 180,
-    borderRadius: 22,
+    width: 172,
+    height: 150,
+    minWidth: 172,
+    borderRadius: 4,
     backgroundColor: PANEL_BG,
-    borderWidth: 1,
-    borderColor: PANEL_BORDER,
-    paddingHorizontal: 18,
-    paddingVertical: 18,
+    borderWidth: 0,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     alignItems: 'center',
-    gap: 10,
+    justifyContent: 'space-between',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.18,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  mobileStatCard: {
+    minWidth: 0,
+    height: 128,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    alignItems: 'flex-start',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 1,
   },
   statLabel: {
-    fontSize: 16,
+    fontSize: 13,
     fontWeight: '700',
-    color: TEXT_SECONDARY,
-    textAlign: 'center',
+    color: TEXT_PRIMARY,
+    textAlign: 'left',
   },
   statValue: {
-    fontSize: 30,
+    fontSize: 24,
     fontWeight: '800',
-    color: ACCENT_GREEN,
+    color: TEXT_PRIMARY,
   },
   sectionRow: {
     flexDirection: 'row',
-    gap: 18,
+    gap: 122,
+    flexWrap: 'wrap',
   },
   sectionRowStack: {
     flexDirection: 'column',
+    gap: 18,
   },
   leftColumn: {
-    flex: 1.1,
+    width: 336,
   },
   rightColumn: {
-    flex: 0.9,
+    width: 336,
+  },
+  columnFull: {
+    width: '100%',
   },
   panel: {
-    borderRadius: 24,
+    borderRadius: 4,
     backgroundColor: PANEL_BG,
-    borderWidth: 1,
-    borderColor: PANEL_BORDER,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    borderWidth: 0,
+    paddingHorizontal: 3,
+    paddingVertical: 0,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  mobilePanel: {
+    borderRadius: 20,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    backgroundColor: 'transparent',
+    shadowOpacity: 0,
+    elevation: 0,
+    gap: 10,
   },
   rowDivider: {
     borderBottomWidth: 1,
-    borderBottomColor: '#ececec',
+    borderBottomColor: '#d8d8d8',
   },
   controlRow: {
-    minHeight: 78,
+    minHeight: 66,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: 12,
+    gap: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+  },
+  mobileControlRow: {
+    minHeight: 86,
+    borderRadius: 18,
+    backgroundColor: PANEL_BG,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    marginBottom: 10,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 1,
   },
   controlLeft: {
     flex: 1,
@@ -766,18 +847,22 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   deviceIcon: {
-    width: 46,
-    height: 46,
-    borderRadius: 14,
+    width: 54,
+    height: 48,
+    borderRadius: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#f3f4f6',
+    backgroundColor: '#ffffff',
+  },
+  mobileDeviceIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: '#f4f7f4',
   },
   controlTextWrap: {
     flex: 1,
-  },
-  controlNameLine: {
-    flexWrap: 'wrap',
+    gap: 2,
   },
   controlName: {
     fontSize: 16,
@@ -785,67 +870,87 @@ const styles = StyleSheet.create({
     color: TEXT_PRIMARY,
   },
   controlStateInline: {
-    fontSize: 14,
+    fontSize: 12,
     color: TEXT_SECONDARY,
     textTransform: 'capitalize',
   },
   modeButton: {
-    minWidth: 84,
+    minWidth: 68,
     alignItems: 'center',
   },
+  mobileModeButton: {
+    minHeight: 38,
+    borderRadius: 999,
+    backgroundColor: '#eef7ef',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
   controlMode: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: ACCENT,
+    fontSize: 12,
+    fontWeight: '800',
+    color: TEXT_PRIMARY,
     textTransform: 'capitalize',
   },
   alertRow: {
-    minHeight: 64,
+    minHeight: 31,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 14,
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 5,
+  },
+  mobileAlertRow: {
+    minHeight: 64,
+    borderRadius: 16,
+    backgroundColor: PANEL_BG,
+    paddingHorizontal: 14,
     paddingVertical: 12,
+    marginBottom: 10,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.07,
+    shadowRadius: 8,
+    elevation: 1,
   },
   alertText: {
     flex: 1,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
     color: TEXT_PRIMARY,
   },
   alertTime: {
-    fontSize: 13,
+    fontSize: 12,
     color: TEXT_SECONDARY,
   },
   panelPagination: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 8,
-    paddingTop: 14,
+    gap: 12,
+    paddingTop: 12,
+    paddingBottom: 8,
   },
   pageDot: {
-    minWidth: 30,
-    height: 30,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: PANEL_BORDER,
-    backgroundColor: '#ffffff',
+    minWidth: 34,
+    height: 34,
+    borderRadius: 12,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 8,
   },
   pageDotActive: {
-    backgroundColor: ACCENT,
-    borderColor: ACCENT,
+    backgroundColor: ACCENT_GREEN,
   },
   pageDotText: {
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '400',
     color: TEXT_PRIMARY,
   },
   pageDotTextActive: {
-    color: '#ffffff',
+    color: TEXT_PRIMARY,
   },
   pageEllipsis: {
     fontSize: 16,
@@ -853,8 +958,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   emptyText: {
-    paddingVertical: 12,
+    paddingVertical: 16,
     fontSize: 14,
     color: TEXT_SECONDARY,
+  },
+  topBarRight: {
+    paddingTop: 12,
+    justifyContent: 'center',
+    alignItems: 'flex-end',
   },
 });

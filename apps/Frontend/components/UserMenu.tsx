@@ -35,11 +35,6 @@ type UserMenuProps = {
   userEmail?: string;
 };
 
-function getInitial(name?: string, email?: string) {
-  const source = (name || email || 'U').trim();
-  return source.charAt(0).toUpperCase();
-}
-
 export function UserMenu({ userName, userEmail }: UserMenuProps) {
   const router = useRouter();
   const triggerRef = useRef<RNView>(null);
@@ -207,18 +202,9 @@ export function UserMenu({ userName, userEmail }: UserMenuProps) {
             <Text style={styles.userName} numberOfLines={1}>
               {userName || 'User'}
             </Text>
-            {userEmail ? (
-              <Text style={styles.userEmail} numberOfLines={1}>
-                {userEmail}
-              </Text>
-            ) : (
-              <Text style={styles.userEmail} numberOfLines={1}>
-                Smart Farm account
-              </Text>
-            )}
           </View>
 
-          <Feather name={isOpen ? 'chevron-down' : 'chevron-up'} size={17} color="#64748b" />
+          <Feather name={isOpen ? 'chevron-down' : 'chevron-up'} size={20} color="#050505" />
         </Pressable>
       </View>
     </>
@@ -311,31 +297,30 @@ const styles = StyleSheet.create({
 
   triggerWrap: {
     width: '100%',
-    paddingHorizontal: 10,
-    paddingTop: 12,
-    paddingBottom: 14,
+    paddingHorizontal: 0,
+    paddingTop: 0,
+    paddingBottom: 0,
     borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
+    borderTopColor: '#d3d3d3',
     backgroundColor: '#ffffff',
   },
 
   trigger: {
     width: '100%',
-    minHeight: 58,
-    paddingHorizontal: 10,
-    paddingVertical: 9,
-    borderRadius: 16,
+    minHeight: 78,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    backgroundColor: '#f8fafc',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
+    gap: 14,
+    backgroundColor: '#ffffff',
+    borderWidth: 0,
+    borderColor: '#ffffff',
   },
 
   triggerOpen: {
-    borderColor: '#22c55e',
-    backgroundColor: '#ecfdf5',
+    backgroundColor: '#f6f6f6',
   },
 
   triggerPressed: {
@@ -343,12 +328,12 @@ const styles = StyleSheet.create({
   },
 
   avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#f1f5f9',
+    backgroundColor: '#eeeeee',
     flexShrink: 0,
   },
 
@@ -364,9 +349,9 @@ const styles = StyleSheet.create({
   },
 
   userName: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#0f172a',
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#050505',
   },
 
   userEmail: {
