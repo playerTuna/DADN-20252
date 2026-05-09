@@ -1,155 +1,206 @@
-import { Feather, FontAwesome6, Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
-import { useRouter } from "expo-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-
-import { Toggle } from "../components/Toggle";
-import { UserMenu } from "../components/UserMenu";
-import { dashboardPayload, sidebarItems } from "../mock/dashboard";
-import { initialDeviceSettings } from "../mock/settings";
-import { userProfile } from "../mock/user";
+import { MobileHeaderMenu } from '../components/MobileHeaderMenu';
+import { BottomNav } from '../components/BottomNav';
+import { Feather, FontAwesome6, Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
+import { useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import {
-  buildControlMapFromDashboard,
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Toggle } from '../components/Toggle';
+import { UserMenu } from '../components/UserMenu';
+import { sidebarItems } from '../constants/navigation';
+import {
   getAlertsLive,
   getDashboard,
-  getFeatures,
+  getManagedDevices,
   getQuickStatsLive,
-  getSettings,
   getUser,
-  updateSetting,
-} from "../services/api";
-import { getTokens } from "../services/auth";
-import type { ControlItem, DashboardData, DeviceType, NavKey } from "../types/dashboard";
+  toggleManagedDeviceAutoMode,
+  updateManagedDevicePower,
+  type ManagedDevice,
+} from '../services/api';
+import { clearTokens, getTokens } from '../services/auth';
+import type { DashboardData, NavKey } from '../types/dashboard';
 
-const ACCENT_GREEN = "#22ff66";
-const PAGE_BG = "#e5e5e5";
-
-function paginationItems(current: number, total: number): (number | "ellipsis")[] {
-  if (total <= 7) {
-    return Array.from({ length: total }, (_, i) => i + 1);
-  }
-  const pages = new Set<number>([1, 2, 3, total - 1, total, current, current - 1, current + 1]);
-  const sorted = [...pages].filter((p) => p >= 1 && p <= total).sort((a, b) => a - b);
-  const out: (number | "ellipsis")[] = [];
-  for (let i = 0; i < sorted.length; i += 1) {
-    if (i > 0 && sorted[i] - sorted[i - 1] > 1) {
-      out.push("ellipsis");
-    }
-    out.push(sorted[i]);
-  }
-  return out;
-}
+const PAGE_BG = '#e5e5e5';
+const PANEL_BG = '#ffffff';
+const PANEL_BORDER = '#d2d2d2';
+const ACCENT = '#160f9b';
+const ACCENT_GREEN = '#28f464';
+const TEXT_PRIMARY = '#050505';
+const TEXT_SECONDARY = '#555555';
+const ERROR_BG = '#ffe4e6';
+const ERROR_TEXT = '#be123c';
 
 const alertsPerPage = 6;
 const controlsPerPage = 5;
 
-function DeviceIcon({ type }: { type: DeviceType }) {
-  if (type === "pump") {
-    return <FontAwesome6 name="pump-soap" size={22} color="#111111" />;
+type DeviceType = 'fan' | 'pump' | 'speaker' | 'rgb' | 'light';
+type DeviceState = 'online' | 'offline';
+
+type HomeControlItem = {
+  id: string;
+  name: string;
+  type: DeviceType;
+  enabled: boolean;
+  mode: 'auto' | 'manually';
+  state: DeviceState;
+};
+
+function paginationItems(current: number, total: number): (number | 'ellipsis')[] {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
   }
 
-  return <Feather name="sun" size={22} color="#111111" />;
+  const pages = new Set<number>([1, 2, 3, total - 1, total, current, current - 1, current + 1]);
+  const sorted = [...pages].filter((p) => p >= 1 && p <= total).sort((a, b) => a - b);
+
+  const output: (number | 'ellipsis')[] = [];
+  for (let i = 0; i < sorted.length; i += 1) {
+    if (i > 0 && sorted[i] - sorted[i - 1] > 1) {
+      output.push('ellipsis');
+    }
+    output.push(sorted[i]);
+  }
+  return output;
+}
+
+function DeviceIcon({ type }: { type: DeviceType }) {
+  if (type === 'pump') {
+    return <FontAwesome6 name="pump-soap" size={22} color={TEXT_PRIMARY} />;
+  }
+  if (type === 'fan') {
+    return <Feather name="wind" size={22} color={TEXT_PRIMARY} />;
+  }
+  if (type === 'speaker') {
+    return <Feather name="volume-2" size={22} color={TEXT_PRIMARY} />;
+  }
+  return <Feather name="sun" size={22} color={TEXT_PRIMARY} />;
+}
+
+function mapDevicesToControls(devices: ManagedDevice[]): HomeControlItem[] {
+  return devices.map((device) => ({
+    id: device.id,
+    name: device.name,
+    type: device.id === 'rgb' ? 'light' : (device.id as DeviceType),
+    enabled: !!device.power,
+    mode: device.autoMode ? 'auto' : 'manually',
+    state: device.connectionStatus === 'online' ? 'online' : device.power ? 'online' : 'offline',
+  }));
+}
+
+function displayHomeTitle(title?: string) {
+  if (!title || title === 'Home - Dashboards') {
+    return 'Home';
+  }
+  return title;
 }
 
 export default function HomeScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
+
   const isDesktop = width >= 960;
   const isTablet = width >= 640;
-  const statsPerRow = isDesktop ? 4 : isTablet ? 2 : 1;
-  const statWidth = `${100 / statsPerRow - (statsPerRow > 1 ? 2 : 0)}%` as const;
+  const statsPerRow = isDesktop ? 4 : 2;
+  const statWidth = isDesktop
+    ? 172
+    : (`${100 / statsPerRow - (statsPerRow > 1 ? 2 : 0)}%` as const);
 
-  const [dashboard, setDashboard] = useState<Record<NavKey, DashboardData>>(dashboardPayload);
-  const [controlMap, setControlMap] = useState<Record<NavKey, ControlItem[]>>(() =>
-    buildControlMapFromDashboard(dashboardPayload, initialDeviceSettings)
-  );
-  const [userName, setUserName] = useState(userProfile.displayName);
+  const [dashboard, setDashboard] = useState<Record<NavKey, DashboardData> | null>(null);
+  const [managedDevices, setManagedDevices] = useState<ManagedDevice[]>([]);
+  const [userName, setUserName] = useState('User');
+  const [userEmail, setUserEmail] = useState<string | undefined>();
   const [bootstrapPending, setBootstrapPending] = useState(true);
-  const [pendingToggleId, setPendingToggleId] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [pendingPowerId, setPendingPowerId] = useState<string | null>(null);
+  const [pendingModeId, setPendingModeId] = useState<string | null>(null);
 
-  const [activeNav, setActiveNav] = useState<NavKey>("home");
-  const [alertPageMap, setAlertPageMap] = useState<Record<NavKey, number>>({
-    home: 1,
-    analytics: 1,
-    devices: 1,
-  });
-  const [controlPageMap, setControlPageMap] = useState<Record<NavKey, number>>({
-    home: 1,
-    analytics: 1,
-    devices: 1,
-  });
-
-  const formatLabel = useCallback(
-    (key: NavKey) => dashboard[key].title,
-    [dashboard]
-  );
-
+  const [alertPage, setAlertPage] = useState(1);
+  const [controlPage, setControlPage] = useState(1);
   const [clock, setClock] = useState(() => new Date());
 
   useEffect(() => {
     let mounted = true;
+
     void (async () => {
       const tokens = await getTokens();
       if (mounted && !tokens) {
-        router.replace("/");
+        router.replace('/');
       }
     })();
+
     return () => {
       mounted = false;
     };
   }, [router]);
 
   useEffect(() => {
-    const tick = setInterval(() => setClock(new Date()), 30_000);
-    return () => clearInterval(tick);
+    const timer = setInterval(() => setClock(new Date()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const refreshLiveHome = useCallback(async () => {
+    const [stats, alerts] = await Promise.all([getQuickStatsLive(), getAlertsLive(40)]);
+
+    setDashboard((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        home: {
+          ...prev.home,
+          stats,
+          alerts,
+        },
+      };
+    });
+  }, []);
+
+  const refreshManagedDevices = useCallback(async () => {
+    const devices = await getManagedDevices();
+    setManagedDevices(devices);
   }, []);
 
   useEffect(() => {
     let cancelled = false;
     let pollTimer: ReturnType<typeof setInterval> | undefined;
 
-    const hydrateLiveHome = async () => {
-      try {
-        const [stats, alerts] = await Promise.all([getQuickStatsLive(), getAlertsLive(40)]);
-        if (cancelled) return;
-        setDashboard((prev) => ({
-          ...prev,
-          home: {
-            ...prev.home,
-            stats,
-            alerts,
-          },
-        }));
-      } catch (e) {
-        console.log("Live dashboard refresh failed", e);
-      }
-    };
-
     void (async () => {
       try {
-        const [dash, settings, profile] = await Promise.all([
-          getDashboard(),
-          getSettings(),
-          getUser(),
-        ]);
+        const [dash, profile] = await Promise.all([getDashboard(), getUser()]);
+
         if (cancelled) return;
+
         setDashboard(dash);
-        setControlMap(buildControlMapFromDashboard(dash, settings));
-        setUserName(profile.displayName);
-        await hydrateLiveHome();
-        await getFeatures().catch(() => undefined);
-      } catch (e) {
-        console.log("Initial dashboard load failed", e);
-        await hydrateLiveHome();
+        setUserName(profile.displayName || 'User');
+        setUserEmail(profile.email);
+
+        await Promise.allSettled([refreshLiveHome(), refreshManagedDevices()]);
+        if (!cancelled) {
+          setErrorMessage(null);
+        }
+      } catch (error) {
+        console.log('Initial home load failed', error);
+        if (!cancelled) {
+          setErrorMessage('Some dashboard data is unavailable.');
+        }
       } finally {
-        if (!cancelled) setBootstrapPending(false);
+        if (!cancelled) {
+          setBootstrapPending(false);
+        }
       }
 
       if (!cancelled) {
         pollTimer = setInterval(() => {
-          void hydrateLiveHome();
+          void Promise.allSettled([refreshLiveHome(), refreshManagedDevices()]);
         }, 10_000);
       }
     })();
@@ -158,102 +209,106 @@ export default function HomeScreen() {
       cancelled = true;
       if (pollTimer) clearInterval(pollTimer);
     };
-  }, []);
+  }, [refreshLiveHome, refreshManagedDevices]);
 
   const handleDevicePower = useCallback(
     async (id: string, next: boolean) => {
-      const snapshot = JSON.parse(JSON.stringify(controlMap)) as Record<NavKey, ControlItem[]>;
-      setControlMap((current) => ({
-        ...current,
-        [activeNav]: current[activeNav].map((item) =>
-          item.id === id
-            ? {
-                ...item,
-                enabled: next,
-                state: next ? "online" : item.mode === "auto" ? "online" : "offline",
-              }
-            : item
-        ),
-      }));
-      setPendingToggleId(id);
+      const snapshot = [...managedDevices];
+
+      setManagedDevices((current) =>
+        current.map((device) => (device.id === id ? { ...device, power: next } : device))
+      );
+      setPendingPowerId(id);
+
       try {
-        await updateSetting(id, next);
-      } catch (e) {
-        console.log("updateSetting failed", e);
-        setControlMap(snapshot);
+        await updateManagedDevicePower(id, next ? 'ON' : 'OFF');
+        const refreshed = await getManagedDevices();
+        setManagedDevices(refreshed);
+        setErrorMessage(null);
+      } catch (error) {
+        console.log('updateManagedDevicePower failed', error);
+        setManagedDevices(snapshot);
+        setErrorMessage('Unable to send device command right now.');
       } finally {
-        setPendingToggleId(null);
+        setPendingPowerId(null);
       }
     },
-    [activeNav, controlMap]
+    [managedDevices]
   );
 
-  const activeData = dashboard[activeNav];
-  const activeControls = controlMap[activeNav];
-  const totalAlertPages = Math.max(
-    1,
-    Math.ceil(activeData.alerts.length / alertsPerPage)
-  );
-  const totalControlPages = Math.max(
-    1,
-    Math.ceil(activeControls.length / controlsPerPage)
-  );
-  const activeAlertPage = Math.min(alertPageMap[activeNav], totalAlertPages);
-  const activeControlPage = Math.min(controlPageMap[activeNav], totalControlPages);
-  const pagedAlerts = useMemo(() => {
-    const start = (activeAlertPage - 1) * alertsPerPage;
-    return activeData.alerts.slice(start, start + alertsPerPage);
-  }, [activeAlertPage, activeData.alerts]);
-  const pagedControls = useMemo(() => {
-    const start = (activeControlPage - 1) * controlsPerPage;
-    return activeControls.slice(start, start + controlsPerPage);
-  }, [activeControlPage, activeControls]);
+  const handleDeviceMode = useCallback(
+    async (id: string) => {
+      const snapshot = [...managedDevices];
 
-  const alertPageItems = useMemo(
-    () => paginationItems(activeAlertPage, totalAlertPages),
-    [activeAlertPage, totalAlertPages]
-  );
-  const controlPageItems = useMemo(
-    () => paginationItems(activeControlPage, totalControlPages),
-    [activeControlPage, totalControlPages]
+      setManagedDevices((current) =>
+        current.map((device) =>
+          device.id === id ? { ...device, autoMode: !device.autoMode } : device
+        )
+      );
+      setPendingModeId(id);
+
+      try {
+        const updated = await toggleManagedDeviceAutoMode(id);
+        setManagedDevices(updated);
+        setErrorMessage(null);
+      } catch (error) {
+        console.log('toggleManagedDeviceAutoMode failed', error);
+        setManagedDevices(snapshot);
+        setErrorMessage('Unable to update automation mode right now.');
+      } finally {
+        setPendingModeId(null);
+      }
+    },
+    [managedDevices]
   );
 
-  const updateControl = (
-    controlId: string,
-    updater: (item: ControlItem) => ControlItem
-  ) => {
-    setControlMap((current) => ({
-      ...current,
-      [activeNav]: current[activeNav].map((item) =>
-        item.id === controlId ? updater(item) : item
-      ),
-    }));
-  };
+  if (!dashboard && bootstrapPending) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={[styles.page, styles.centered]}>
+          <ActivityIndicator size="large" color={ACCENT} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
-  const toggleMode = (controlId: string) => {
-    updateControl(controlId, (item) => ({
-      ...item,
-      mode: item.mode === "auto" ? "manually" : "auto",
-      state: item.enabled ? "online" : "offline",
-    }));
-  };
+  if (!dashboard) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={[styles.page, styles.centered, { padding: 24 }]}>
+          <Text style={styles.errorBanner}>Unable to load dashboard.</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const activeData = dashboard.home;
+  const activeControls = mapDevicesToControls(managedDevices);
+
+  const totalAlertPages = Math.max(1, Math.ceil(activeData.alerts.length / alertsPerPage));
+  const totalControlPages = Math.max(1, Math.ceil(activeControls.length / controlsPerPage));
+
+  const safeAlertPage = Math.min(alertPage, totalAlertPages);
+  const safeControlPage = Math.min(controlPage, totalControlPages);
+
+  const pagedAlerts = activeData.alerts.slice(
+    (safeAlertPage - 1) * alertsPerPage,
+    (safeAlertPage - 1) * alertsPerPage + alertsPerPage
+  );
+
+  const pagedControls = activeControls.slice(
+    (safeControlPage - 1) * controlsPerPage,
+    (safeControlPage - 1) * controlsPerPage + controlsPerPage
+  );
+
+  const alertPageItems = paginationItems(safeAlertPage, totalAlertPages);
+  const controlPageItems = paginationItems(safeControlPage, totalControlPages);
 
   const handleNavPress = (key: NavKey) => {
-    if (key === "analytics" || key === "devices") {
+    if (key === 'analytics' || key === 'devices') {
       router.push(`/${key}`);
       return;
     }
-    setActiveNav(key);
-    const maxAlert = Math.max(1, Math.ceil(dashboard[key].alerts.length / alertsPerPage));
-    const maxControl = Math.max(1, Math.ceil(controlMap[key].length / controlsPerPage));
-    setAlertPageMap((current) => ({
-      ...current,
-      [key]: Math.min(current[key], maxAlert),
-    }));
-    setControlPageMap((current) => ({
-      ...current,
-      [key]: Math.min(current[key], maxControl),
-    }));
   };
 
   const renderSidebar = () => (
@@ -261,7 +316,7 @@ export default function HomeScreen() {
       <View>
         <View style={styles.brandRow}>
           <Image
-            source={require("../assets/images/logo.png")}
+            source={require('../assets/images/logo.png')}
             style={styles.brandLogo}
             contentFit="contain"
           />
@@ -272,59 +327,23 @@ export default function HomeScreen() {
 
         <View style={styles.navList}>
           {sidebarItems.map((item) => {
-            const isActive = item.key === activeNav;
+            const isActive = item.key === 'home';
             return (
               <Pressable
                 key={item.key}
                 onPress={() => handleNavPress(item.key)}
                 style={[styles.navItem, isActive && styles.navItemActive]}
               >
-                <Feather
-                  name={item.icon}
-                  size={20}
-                  color={isActive ? "#ffffff" : "#111111"}
-                />
-                <Text style={[styles.navText, isActive && styles.navTextActive]}>
-                  {item.label}
-                </Text>
+                <Feather name={item.icon} size={22} color={TEXT_PRIMARY} />
+                <Text style={[styles.navText, isActive && styles.navTextActive]}>{item.label}</Text>
               </Pressable>
             );
           })}
         </View>
       </View>
 
-      <UserMenu userName={userName} />
+      <UserMenu userName={userName} userEmail={userEmail} />
     </View>
-  );
-
-  const renderMobileNav = () => (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.mobileNav}
-    >
-      {sidebarItems.map((item) => {
-        const isActive = item.key === activeNav;
-        return (
-          <Pressable
-            key={item.key}
-            onPress={() => handleNavPress(item.key)}
-            style={[styles.mobileNavItem, isActive && styles.mobileNavItemActive]}
-          >
-            <Feather
-              name={item.icon}
-              size={16}
-              color={isActive ? "#ffffff" : "#111111"}
-            />
-            <Text
-              style={[styles.mobileNavText, isActive && styles.mobileNavTextActive]}
-            >
-              {item.label}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </ScrollView>
   );
 
   return (
@@ -333,175 +352,195 @@ export default function HomeScreen() {
         {isDesktop ? renderSidebar() : null}
 
         <View style={styles.mainArea}>
-          <View style={styles.topBar}>
-            <View style={styles.topBarTitleRow}>
-              <Text style={styles.pageTitle}>{formatLabel(activeNav)}</Text>
-              {bootstrapPending ? (
-                <ActivityIndicator size="small" color="#2f37ff" />
-              ) : null}
+          <View style={[styles.topBar, !isDesktop && styles.mobileTopBar]}>
+            <View style={[styles.topBarTitleRow, !isDesktop && styles.mobileTitleWrap]}>
+              <Text style={[styles.pageTitle, !isDesktop && styles.mobilePageTitle]}>
+                {displayHomeTitle(activeData.title)}
+              </Text>
+              {!isDesktop ? <Text style={styles.headerGreeting}>Hi, {userName}</Text> : null}
+              {bootstrapPending ? <ActivityIndicator size="small" color={ACCENT} /> : null}
             </View>
-            <View style={styles.timeWrap}>
-              <Text style={styles.timeText}>
-                {clock.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
-              </Text>
-              <Text style={styles.dateText}>
-                {clock.toLocaleDateString(undefined, {
-                  day: "2-digit",
-                  month: "2-digit",
-                  year: "2-digit",
-                })}
-              </Text>
+
+            <View style={styles.topBarRight}>
+              <MobileHeaderMenu
+                userName={userName}
+                userEmail={userEmail}
+                onLogout={async () => {
+                  await clearTokens();
+                  router.replace('/');
+                }}
+              />
             </View>
           </View>
 
-          {!isDesktop ? renderMobileNav() : null}
-
           <ScrollView
             style={styles.container}
-            contentContainerStyle={styles.content}
-            showsVerticalScrollIndicator={false}
+            contentContainerStyle={[styles.content, isDesktop && styles.contentDesktop]}
           >
+            {errorMessage ? <Text style={styles.errorBanner}>{errorMessage}</Text> : null}
+
             <Text style={styles.sectionTitle}>Quick Stats</Text>
-            <View style={styles.statsGrid}>
+            <View style={[styles.statsGrid, !isDesktop && styles.mobileStatsGrid]}>
               {activeData.stats.map((item) => (
-                <Pressable key={item.label} style={[styles.statCard, { width: statWidth }]}>
+                <View
+                  key={item.label}
+                  style={[
+                    styles.statCard,
+                    !isDesktop && styles.mobileStatCard,
+                    { width: statWidth },
+                  ]}
+                >
                   <Text style={styles.statLabel}>{item.label}</Text>
-                  <Ionicons name={item.icon} size={46} color="#111111" />
+                  <Ionicons
+                    name={item.icon as never}
+                    size={isDesktop ? 46 : 32}
+                    color={TEXT_PRIMARY}
+                  />
                   <Text style={styles.statValue}>{item.value}</Text>
-                </Pressable>
+                </View>
               ))}
             </View>
 
             <View style={[styles.sectionRow, !isTablet && styles.sectionRowStack]}>
-              <View style={styles.leftColumn}>
+              <View style={[styles.leftColumn, !isTablet && styles.columnFull]}>
                 <Text style={styles.sectionTitle}>Quick Control</Text>
-                <View style={styles.panel}>
+
+                <View style={[styles.panel, !isDesktop && styles.mobilePanel]}>
+                  {pagedControls.length === 0 ? (
+                    <Text style={styles.emptyText}>No managed devices available.</Text>
+                  ) : null}
+
                   {pagedControls.map((item, index) => (
                     <View
                       key={item.id}
                       style={[
                         styles.controlRow,
-                        index !== pagedControls.length - 1 && styles.rowDivider,
+                        !isDesktop && styles.mobileControlRow,
+                        isDesktop && index !== pagedControls.length - 1 && styles.rowDivider,
                       ]}
                     >
                       <View style={styles.controlLeft}>
-                        <View style={styles.deviceIcon}>
+                        <View style={[styles.deviceIcon, !isDesktop && styles.mobileDeviceIcon]}>
                           <DeviceIcon type={item.type} />
                         </View>
+
                         <View style={styles.controlTextWrap}>
-                          <Text style={styles.controlNameLine}>
-                            <Text style={styles.controlName}>{item.name}</Text>
-                            <Text style={styles.controlStateInline}> {item.state}</Text>
-                          </Text>
+                          <Text style={styles.controlName}>{item.name}</Text>
+                          <Text style={styles.controlStateInline}>{item.state}</Text>
                         </View>
                       </View>
 
                       <Pressable
-                        onPress={() => toggleMode(item.id)}
-                        style={styles.modeButton}
+                        onPress={() => void handleDeviceMode(item.id)}
+                        disabled={bootstrapPending || pendingModeId === item.id}
+                        style={[styles.modeButton, !isDesktop && styles.mobileModeButton]}
                       >
-                        <Text style={styles.controlMode}>{item.mode}</Text>
+                        <Text style={styles.controlMode}>
+                          {pendingModeId === item.id ? 'updating...' : item.mode}
+                        </Text>
                       </Pressable>
 
                       <Toggle
                         checked={item.enabled}
                         disabled={bootstrapPending}
-                        loading={pendingToggleId === item.id}
+                        loading={pendingPowerId === item.id}
                         onChange={(next) => {
                           void handleDevicePower(item.id, next);
                         }}
                       />
                     </View>
                   ))}
-                  <View style={styles.panelPagination}>
-                    {controlPageItems.map((entry, idx) =>
-                      entry === "ellipsis" ? (
-                        <Text key={`c-el-${idx}`} style={styles.pageEllipsis}>
-                          ...
-                        </Text>
-                      ) : (
-                        <Pressable
-                          key={`${activeNav}-c-${entry}`}
-                          onPress={() =>
-                            setControlPageMap((current) => ({
-                              ...current,
-                              [activeNav]: entry,
-                            }))
-                          }
-                          style={[
-                            styles.pageDot,
-                            entry === activeControlPage && styles.pageDotActive,
-                          ]}
-                        >
-                          <Text
+
+                  {totalControlPages > 1 ? (
+                    <View style={styles.panelPagination}>
+                      {controlPageItems.map((entry, idx) =>
+                        entry === 'ellipsis' ? (
+                          <Text key={`c-el-${idx}`} style={styles.pageEllipsis}>
+                            ...
+                          </Text>
+                        ) : (
+                          <Pressable
+                            key={`c-${entry}`}
+                            onPress={() => setControlPage(entry)}
                             style={[
-                              styles.pageDotText,
-                              entry === activeControlPage && styles.pageDotTextActive,
+                              styles.pageDot,
+                              entry === safeControlPage && styles.pageDotActive,
                             ]}
                           >
-                            {entry}
-                          </Text>
-                        </Pressable>
-                      )
-                    )}
-                  </View>
+                            <Text
+                              style={[
+                                styles.pageDotText,
+                                entry === safeControlPage && styles.pageDotTextActive,
+                              ]}
+                            >
+                              {entry}
+                            </Text>
+                          </Pressable>
+                        )
+                      )}
+                    </View>
+                  ) : null}
                 </View>
               </View>
 
-              <View style={styles.rightColumn}>
+              <View style={[styles.rightColumn, !isTablet && styles.columnFull]}>
                 <Text style={styles.sectionTitle}>Alert log</Text>
 
-                <View style={styles.panel}>
+                <View style={[styles.panel, !isDesktop && styles.mobilePanel]}>
+                  {pagedAlerts.length === 0 ? (
+                    <Text style={styles.emptyText}>No alerts yet.</Text>
+                  ) : null}
+
                   {pagedAlerts.map((item, index) => (
-                    <Pressable
+                    <View
                       key={item.id}
                       style={[
                         styles.alertRow,
-                        index !== pagedAlerts.length - 1 && styles.rowDivider,
+                        !isDesktop && styles.mobileAlertRow,
+                        isDesktop && index !== pagedAlerts.length - 1 && styles.rowDivider,
                       ]}
                     >
                       <Text style={styles.alertText}>{item.text}</Text>
                       <Text style={styles.alertTime}>{item.time}</Text>
-                    </Pressable>
+                    </View>
                   ))}
-                  <View style={styles.panelPagination}>
-                    {alertPageItems.map((entry, idx) =>
-                      entry === "ellipsis" ? (
-                        <Text key={`a-el-${idx}`} style={styles.pageEllipsis}>
-                          ...
-                        </Text>
-                      ) : (
-                        <Pressable
-                          key={`${activeNav}-a-${entry}`}
-                          onPress={() =>
-                            setAlertPageMap((current) => ({
-                              ...current,
-                              [activeNav]: entry,
-                            }))
-                          }
-                          style={[
-                            styles.pageDot,
-                            entry === activeAlertPage && styles.pageDotActive,
-                          ]}
-                        >
-                          <Text
+
+                  {totalAlertPages > 1 ? (
+                    <View style={styles.panelPagination}>
+                      {alertPageItems.map((entry, idx) =>
+                        entry === 'ellipsis' ? (
+                          <Text key={`a-el-${idx}`} style={styles.pageEllipsis}>
+                            ...
+                          </Text>
+                        ) : (
+                          <Pressable
+                            key={`a-${entry}`}
+                            onPress={() => setAlertPage(entry)}
                             style={[
-                              styles.pageDotText,
-                              entry === activeAlertPage && styles.pageDotTextActive,
+                              styles.pageDot,
+                              entry === safeAlertPage && styles.pageDotActive,
                             ]}
                           >
-                            {entry}
-                          </Text>
-                        </Pressable>
-                      )
-                    )}
-                  </View>
+                            <Text
+                              style={[
+                                styles.pageDotText,
+                                entry === safeAlertPage && styles.pageDotTextActive,
+                              ]}
+                            >
+                              {entry}
+                            </Text>
+                          </Pressable>
+                        )
+                      )}
+                    </View>
+                  ) : null}
                 </View>
               </View>
             </View>
           </ScrollView>
         </View>
       </View>
+      {!isDesktop ? <BottomNav activeKey="home" /> : null}
     </SafeAreaView>
   );
 }
@@ -513,312 +552,419 @@ const styles = StyleSheet.create({
   },
   page: {
     flex: 1,
-    flexDirection: "row",
+    flexDirection: 'row',
     backgroundColor: PAGE_BG,
   },
+  centered: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   sidebar: {
-    width: 176,
-    backgroundColor: "#ffffff",
+    width: 240,
+    backgroundColor: PANEL_BG,
     borderRightWidth: 1,
-    borderRightColor: "#d5d5d5",
-    justifyContent: "space-between",
+    borderRightColor: PANEL_BORDER,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    justifyContent: 'space-between',
   },
   brandRow: {
-    height: 70,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 10,
-    gap: 10,
+    height: 94,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingHorizontal: 16,
   },
   brandLogo: {
-    width: 38,
-    height: 38,
+    width: 48,
+    height: 48,
   },
   brandText: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#111111",
+    fontSize: 26,
+    fontWeight: '800',
+    color: TEXT_PRIMARY,
   },
   sidebarDivider: {
     height: 1,
-    backgroundColor: "#d5d5d5",
+    backgroundColor: PANEL_BORDER,
   },
   navList: {
-    paddingTop: 54,
+    marginTop: 66,
   },
   navItem: {
-    height: 46,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 16,
-    paddingHorizontal: 10,
+    height: 64,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 20,
+    borderRadius: 0,
+    paddingHorizontal: 16,
   },
   navItemActive: {
     backgroundColor: ACCENT_GREEN,
   },
   navText: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#111111",
+    fontSize: 18,
+    fontWeight: '700',
+    color: TEXT_PRIMARY,
   },
   navTextActive: {
-    fontWeight: "700",
-    color: "#ffffff",
+    color: TEXT_PRIMARY,
   },
   mainArea: {
     flex: 1,
   },
   topBar: {
-    minHeight: 52,
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    backgroundColor: "#ffffff",
+    height: 64,
+    paddingHorizontal: 40,
+    backgroundColor: PANEL_BG,
     borderBottomWidth: 1,
-    borderBottomColor: "#d5d5d5",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 2,
+    borderBottomColor: PANEL_BORDER,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  mobileTopBar: {
+    height: 'auto',
+    minHeight: 84,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    alignItems: 'flex-start',
   },
   topBarTitleRow: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 10,
   },
+  mobileTitleWrap: {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 2,
+    flex: 1,
+  },
   pageTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: TEXT_PRIMARY,
+  },
+  mobilePageTitle: {
+    fontSize: 28,
+    fontWeight: '800',
+  },
+  headerGreeting: {
     fontSize: 14,
-    fontWeight: "500",
-    color: "#111111",
+    color: TEXT_SECONDARY,
   },
   timeWrap: {
-    alignItems: "flex-end",
+    alignItems: 'flex-end',
+  },
+  mobileTimeWrap: {
+    paddingTop: 3,
   },
   timeText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#111111",
+    fontSize: 16,
+    fontWeight: '800',
+    color: TEXT_PRIMARY,
   },
   dateText: {
     marginTop: 2,
-    fontSize: 11,
-    color: "#505050",
+    fontSize: 14,
+    color: TEXT_SECONDARY,
   },
   mobileNav: {
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 10,
-    backgroundColor: PAGE_BG,
-    borderBottomWidth: 1,
-    borderBottomColor: "#d5d5d5",
+    paddingTop: 4,
+    paddingBottom: 12,
+    gap: 8,
   },
   mobileNavItem: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
+    minHeight: 42,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: "#ffffff",
-    borderWidth: 1,
-    borderColor: "#d9d9d9",
   },
   mobileNavItemActive: {
     backgroundColor: ACCENT_GREEN,
+    borderColor: ACCENT_GREEN,
   },
   mobileNavText: {
     fontSize: 13,
-    fontWeight: "600",
-    color: "#111111",
+    fontWeight: '700',
+    color: TEXT_PRIMARY,
   },
   mobileNavTextActive: {
-    color: "#ffffff",
+    color: TEXT_PRIMARY,
   },
   container: {
     flex: 1,
   },
   content: {
-    paddingHorizontal: 20,
-    paddingTop: 36,
-    paddingBottom: 28,
+    paddingHorizontal: 18,
+    paddingBottom: 96,
+    gap: 18,
+  },
+  contentDesktop: {
+    paddingHorizontal: 48,
+    paddingTop: 40,
+  },
+  errorBanner: {
+    borderRadius: 4,
+    backgroundColor: ERROR_BG,
+    color: ERROR_TEXT,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 14,
+    fontWeight: '700',
   },
   sectionTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#111111",
-    marginBottom: 18,
+    paddingTop: 12,
+    fontSize: 18,
+    fontWeight: '800',
+    color: TEXT_PRIMARY,
+    marginBottom: 12,
   },
   statsGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-    gap: 18,
-    marginBottom: 22,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 36,
+  },
+  mobileStatsGrid: {
+    justifyContent: 'space-between',
+    gap: 12,
   },
   statCard: {
-    minHeight: 150,
-    backgroundColor: "#ffffff",
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#e8e8e8",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 18,
+    width: 172,
+    height: 150,
+    minWidth: 172,
+    borderRadius: 4,
+    backgroundColor: PANEL_BG,
+    borderWidth: 0,
     paddingHorizontal: 14,
-    shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.18,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  mobileStatCard: {
+    minWidth: 0,
+    height: 128,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    alignItems: 'flex-start',
+    shadowOpacity: 0.08,
     shadowRadius: 8,
-    elevation: 3,
+    elevation: 1,
   },
   statLabel: {
-    fontSize: 15,
-    fontWeight: "500",
-    color: "#111111",
-    textAlign: "center",
+    fontSize: 13,
+    fontWeight: '700',
+    color: TEXT_PRIMARY,
+    textAlign: 'left',
   },
   statValue: {
     fontSize: 24,
-    fontWeight: "500",
-    color: "#111111",
+    fontWeight: '800',
+    color: TEXT_PRIMARY,
   },
   sectionRow: {
-    flexDirection: "row",
-    gap: 28,
-    alignItems: "flex-start",
+    flexDirection: 'row',
+    gap: 122,
+    flexWrap: 'wrap',
   },
   sectionRowStack: {
-    flexDirection: "column",
+    flexDirection: 'column',
+    gap: 18,
   },
   leftColumn: {
-    flex: 1.1,
-    minWidth: 0,
+    width: 336,
   },
   rightColumn: {
-    flex: 0.95,
-    minWidth: 0,
+    width: 336,
+  },
+  columnFull: {
+    width: '100%',
   },
   panel: {
-    backgroundColor: "#ffffff",
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#e8e8e8",
-    overflow: "hidden",
-    shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    elevation: 3,
+    borderRadius: 4,
+    backgroundColor: PANEL_BG,
+    borderWidth: 0,
+    paddingHorizontal: 3,
+    paddingVertical: 0,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  mobilePanel: {
+    borderRadius: 20,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    backgroundColor: 'transparent',
+    shadowOpacity: 0,
+    elevation: 0,
+    gap: 10,
   },
   rowDivider: {
     borderBottomWidth: 1,
-    borderBottomColor: "#d9d9d9",
+    borderBottomColor: '#d8d8d8',
   },
   controlRow: {
     minHeight: 66,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    gap: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+  },
+  mobileControlRow: {
+    minHeight: 86,
+    borderRadius: 18,
+    backgroundColor: PANEL_BG,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    marginBottom: 10,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 1,
   },
   controlLeft: {
     flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   deviceIcon: {
-    width: 52,
-    alignItems: "center",
-    justifyContent: "center",
+    width: 54,
+    height: 48,
+    borderRadius: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ffffff',
+  },
+  mobileDeviceIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: '#f4f7f4',
   },
   controlTextWrap: {
-    justifyContent: "center",
+    flex: 1,
+    gap: 2,
   },
   controlName: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#111111",
-  },
-  controlNameLine: {
-    flexShrink: 1,
+    fontSize: 16,
+    fontWeight: '800',
+    color: TEXT_PRIMARY,
   },
   controlStateInline: {
-    fontSize: 14,
-    fontWeight: "400",
-    color: "#111111",
-    textTransform: "capitalize",
+    fontSize: 12,
+    color: TEXT_SECONDARY,
+    textTransform: 'capitalize',
   },
   modeButton: {
-    minWidth: 82,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#d3d3d3",
-    backgroundColor: "#fafafa",
-    alignItems: "center",
+    minWidth: 68,
+    alignItems: 'center',
+  },
+  mobileModeButton: {
+    minHeight: 38,
+    borderRadius: 999,
+    backgroundColor: '#eef7ef',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
   },
   controlMode: {
-    fontSize: 13,
-    color: "#111111",
-    textTransform: "capitalize",
+    fontSize: 12,
+    fontWeight: '800',
+    color: TEXT_PRIMARY,
+    textTransform: 'capitalize',
   },
   alertRow: {
-    minHeight: 38,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical: 8,
+    minHeight: 31,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     gap: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 5,
+  },
+  mobileAlertRow: {
+    minHeight: 64,
+    borderRadius: 16,
+    backgroundColor: PANEL_BG,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 10,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.07,
+    shadowRadius: 8,
+    elevation: 1,
   },
   alertText: {
     flex: 1,
-    fontSize: 12,
-    color: "#111111",
+    fontSize: 14,
+    fontWeight: '700',
+    color: TEXT_PRIMARY,
   },
   alertTime: {
     fontSize: 12,
-    color: "#444444",
+    color: TEXT_SECONDARY,
   },
   panelPagination: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    flexWrap: "wrap",
-    gap: 8,
-    paddingVertical: 14,
-    paddingHorizontal: 12,
-    borderTopWidth: 1,
-    borderTopColor: "#efefef",
-  },
-  pageEllipsis: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#666666",
-    paddingHorizontal: 2,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+    paddingTop: 12,
+    paddingBottom: 8,
   },
   pageDot: {
-    minWidth: 28,
-    height: 28,
-    borderRadius: 6,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 6,
+    minWidth: 34,
+    height: 34,
+    borderRadius: 12,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
   },
   pageDotActive: {
     backgroundColor: ACCENT_GREEN,
   },
   pageDotText: {
-    fontSize: 12,
-    color: "#111111",
+    fontSize: 13,
+    fontWeight: '400',
+    color: TEXT_PRIMARY,
   },
   pageDotTextActive: {
-    fontWeight: "700",
+    color: TEXT_PRIMARY,
+  },
+  pageEllipsis: {
+    fontSize: 16,
+    color: TEXT_SECONDARY,
+    paddingHorizontal: 4,
+  },
+  emptyText: {
+    paddingVertical: 16,
+    fontSize: 14,
+    color: TEXT_SECONDARY,
+  },
+  topBarRight: {
+    paddingTop: 12,
+    justifyContent: 'center',
+    alignItems: 'flex-end',
   },
 });

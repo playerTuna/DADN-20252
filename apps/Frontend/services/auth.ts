@@ -1,5 +1,6 @@
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
+import { getApiBaseUrl } from "./runtimeConfig";
 
 type Tokens = {
   accessToken: string;
@@ -22,13 +23,6 @@ const ACCESS_KEY = "auth.accessToken";
 const REFRESH_KEY = "auth.refreshToken";
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const STRONG_PASSWORD_REGEX = /^(?=.*[A-Za-z])(?=.*\d).{8,64}$/;
-
-function getApiBaseUrl(): string {
-  if (typeof process !== "undefined" && process.env && process.env.EXPO_PUBLIC_API_BASE_URL) {
-    return process.env.EXPO_PUBLIC_API_BASE_URL;
-  }
-  return "http://localhost:3001";
-}
 
 async function setItem(key: string, value: string) {
   // SecureStore on web can be flaky depending on environment; use localStorage fallback.

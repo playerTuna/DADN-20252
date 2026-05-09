@@ -1,5 +1,4 @@
-import { randomUUID } from "crypto";
-import { Body, Controller, Get, Headers, Post } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Post, Req } from "@nestjs/common";
 import { CommandLogService } from "./command-log.service";
 import {
   ControllableDeviceKey,
@@ -7,26 +6,33 @@ import {
   SetRgbDto,
   SetToggleDto,
 } from "./dto/command.dto";
-import { MqttService } from "../mqtt/mqtt.service";
+import { CommandService } from "./command.service";
+
+type JwtRequestUser = {
+  userId: string;
+  email: string;
+};
 
 @Controller("commands")
 export class CommandsController {
   constructor(
-    private readonly mqttService: MqttService,
+    private readonly commandService: CommandService,
     private readonly commandLogService: CommandLogService,
   ) {}
 
   @Post("pump")
   async setPump(
     @Body() dto: SetPumpDto,
+    @Req() req: { user?: JwtRequestUser },
     @Headers("idempotency-key") idempotencyKey?: string,
   ) {
-    return this.sendCommand("pump", dto.value, idempotencyKey);
+    return this.sendCommand("pump", dto.value, req.user?.userId, idempotencyKey);
   }
 
   @Post("rgb")
   async setRgb(
     @Body() dto: SetRgbDto,
+    @Req() req: { user?: JwtRequestUser },
     @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     const format = dto.format ?? "csv";
@@ -34,23 +40,25 @@ export class CommandsController {
       format === "json"
         ? JSON.stringify({ r: dto.r, g: dto.g, b: dto.b })
         : `${dto.r},${dto.g},${dto.b}`;
-    return this.sendCommand("rgb", payload, idempotencyKey);
+    return this.sendCommand("rgb", payload, req.user?.userId, idempotencyKey);
   }
 
   @Post("fan")
   async setFan(
     @Body() dto: SetToggleDto,
+    @Req() req: { user?: JwtRequestUser },
     @Headers("idempotency-key") idempotencyKey?: string,
   ) {
-    return this.sendCommand("fan", dto.value, idempotencyKey);
+    return this.sendCommand("fan", dto.value, req.user?.userId, idempotencyKey);
   }
 
   @Post("speaker")
   async setSpeaker(
     @Body() dto: SetToggleDto,
+    @Req() req: { user?: JwtRequestUser },
     @Headers("idempotency-key") idempotencyKey?: string,
   ) {
-    return this.sendCommand("speaker", dto.value, idempotencyKey);
+    return this.sendCommand("speaker", dto.value, req.user?.userId, idempotencyKey);
   }
 
   @Get("logs")
@@ -61,37 +69,12 @@ export class CommandsController {
   private async sendCommand(
     target: ControllableDeviceKey,
     payload: string,
+    userId?: string,
     idempotencyKey?: string,
   ) {
-    if (idempotencyKey) {
-      const existed =
-        await this.commandLogService.findByIdempotencyKey(idempotencyKey);
-      if (existed) {
-        return { ok: true, deduplicated: true, command: existed };
-      }
-    }
-
-    const commandId = randomUUID();
-    const issuedAt = new Date();
-
-    await this.commandLogService.createSent({
-      commandId,
-      target,
-      payload,
-      issuedAt,
+    return this.commandService.sendCommand(target, payload, {
+      userId,
       idempotencyKey,
     });
-
-    try {
-      // Publish retries are useful for brief broker/network hiccups.
-      await this.mqttService.publishWithRetry(target, payload, 3);
-      return { ok: true, commandId, status: "sent" };
-    } catch (err) {
-      await this.commandLogService.markFailed(
-        commandId,
-        err instanceof Error ? err.message : "Unknown MQTT publish error",
-      );
-      throw err;
-    }
   }
 }

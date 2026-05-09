@@ -23,6 +23,12 @@ export const ALL_LOGICAL_KEYS = Object.freeze([
   "stream",
 ] as const);
 
+const LOGICAL_KEY_ALIASES: Record<string, LogicalFeedKey> = {
+  "air-humidity": "air_humidity",
+  "soil-humidity": "soil_humidity",
+  "water-pump": "pump",
+};
+
 export const FEED_KEY_MAPPING: Record<LogicalFeedKey, [string, string]> = {
   temp: ["FEED_TEMP_KEY", "yolo-farm-temp"],
   air_humidity: ["FEED_AIR_HUMIDITY_KEY", "yolo-farm-air-humidity"],
@@ -51,6 +57,20 @@ export function getSubscribeKeys(): LogicalFeedKey[] {
   const raw = process.env.SUBSCRIBE_FEEDS ?? "";
   if (!raw) return [...ALL_LOGICAL_KEYS];
 
-  const keysFromEnv = new Set(raw.split(",").map((s) => s.trim()));
+  const keysFromEnv = new Set(
+    raw
+      .split(",")
+      .map((s) => normalizeLogicalKey(s))
+      .filter((value): value is LogicalFeedKey => value !== null),
+  );
   return ALL_LOGICAL_KEYS.filter((k) => keysFromEnv.has(k));
+}
+
+export function normalizeLogicalKey(value: string): LogicalFeedKey | null {
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed) return null;
+  const normalized = LOGICAL_KEY_ALIASES[trimmed] ?? trimmed;
+  return (ALL_LOGICAL_KEYS as readonly string[]).includes(normalized)
+    ? (normalized as LogicalFeedKey)
+    : null;
 }

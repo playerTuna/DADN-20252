@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import { Model } from "mongoose";
 import { IngestMqttMessage, TelemetryType } from "./telemetry.types";
@@ -6,15 +6,19 @@ import { classifyThreshold, isSensorType } from "./thresholds";
 import { RealtimeService } from "../realtime/realtime.service";
 import { Alert } from "./entity/alert.schema";
 import { Telemetry } from "./entity/telemetry.schema";
+import { AutomationService } from "../automation/automation.service";
 
 @Injectable()
 export class TelemetryService {
+  private readonly logger = new Logger(TelemetryService.name);
+
   constructor(
     @InjectModel(Telemetry.name)
     private readonly telemetryModel: Model<Telemetry>,
     @InjectModel(Alert.name)
     private readonly alertModel: Model<Alert>,
     private readonly realtimeService: RealtimeService,
+    private readonly automationService: AutomationService,
   ) {}
 
   async ingestFromMqtt(msg: IngestMqttMessage) {
@@ -37,6 +41,13 @@ export class TelemetryService {
 
     // Use a transaction in a real-world scenario for atomicity
     await this.telemetryModel.create(telemetryData);
+    this.logger.log(
+      `Telemetry stored: ${telemetryData.type} from ${telemetryData.feedKey}`,
+    );
+    await this.automationService.evaluateTelemetry({
+      ...msg,
+      numericValue,
+    });
 
     this.realtimeService.publishTelemetry({
       ...telemetryData,

@@ -1,8 +1,8 @@
-import { Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
-import { useRouter } from "expo-router";
-import { useState } from "react";
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import { useState } from 'react';
 import {
+  Image,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
@@ -11,16 +11,16 @@ import {
   Text,
   TextInput,
   View,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { login, validateEmailInput, validatePasswordInput } from "../services/auth";
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { login, validateEmailInput, validatePasswordInput } from '../services/auth';
 
 export default function LoginScreen() {
   const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [focusedField, setFocusedField] = useState<"email" | "password" | null>(null);
+  const [focusedField, setFocusedField] = useState<'email' | 'password' | null>(null);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -41,9 +41,9 @@ export default function LoginScreen() {
     setFormError(null);
     try {
       await login(email, password);
-      router.replace("/home");
+      router.replace('/home');
     } catch (e) {
-      setFormError(e instanceof Error ? e.message : "Login failed");
+      setFormError(e instanceof Error ? e.message : 'Login failed');
     } finally {
       setSubmitting(false);
     }
@@ -52,35 +52,31 @@ export default function LoginScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.container}
       >
         <View style={styles.hero}>
           <View style={styles.logoBadge}>
             <Image
-              source={require("../assets/images/logo.png")}
+              source={require('../assets/images/logo.png')}
               style={styles.logoImage}
-              contentFit="contain"
+              resizeMode="contain"
             />
           </View>
           <Text style={styles.brand}>Smart Farm</Text>
-          <Text style={styles.subtitle}>
-            Monitor your farm status and control devices anytime.
-          </Text>
+          <Text style={styles.subtitle}>Monitor your farm status and control devices anytime.</Text>
         </View>
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Sign in</Text>
-          <Text style={styles.cardDescription}>
-            Welcome back to your Smart Farm dashboard.
-          </Text>
+          <Text style={styles.cardDescription}>Welcome back to your Smart Farm dashboard.</Text>
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Email</Text>
             <View
               style={[
                 styles.inputWrapper,
-                focusedField === "email" && styles.inputWrapperFocused,
+                focusedField === 'email' && styles.inputWrapperFocused,
                 errors.email ? styles.inputWrapperError : null,
               ]}
             >
@@ -96,8 +92,8 @@ export default function LoginScreen() {
                   setEmail(t);
                   if (errors.email) setErrors((e) => ({ ...e, email: undefined }));
                 }}
-                onFocus={() => setFocusedField("email")}
-                onBlur={() => setFocusedField((f) => (f === "email" ? null : f))}
+                onFocus={() => setFocusedField('email')}
+                onBlur={() => setFocusedField((f) => (f === 'email' ? null : f))}
                 style={styles.input}
               />
             </View>
@@ -109,7 +105,7 @@ export default function LoginScreen() {
             <View
               style={[
                 styles.inputWrapper,
-                focusedField === "password" && styles.inputWrapperFocused,
+                focusedField === 'password' && styles.inputWrapperFocused,
                 errors.password ? styles.inputWrapperError : null,
               ]}
             >
@@ -123,17 +119,17 @@ export default function LoginScreen() {
                   setPassword(t);
                   if (errors.password) setErrors((e) => ({ ...e, password: undefined }));
                 }}
-                onFocus={() => setFocusedField("password")}
-                onBlur={() => setFocusedField((f) => (f === "password" ? null : f))}
+                onFocus={() => setFocusedField('password')}
+                onBlur={() => setFocusedField((f) => (f === 'password' ? null : f))}
                 style={styles.input}
               />
               <Pressable
                 onPress={() => setShowPassword((s) => !s)}
                 hitSlop={10}
-                accessibilityLabel={showPassword ? "Hide password" : "Show password"}
+                accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
               >
                 <Ionicons
-                  name={showPassword ? "eye-off-outline" : "eye-outline"}
+                  name={showPassword ? 'eye-off-outline' : 'eye-outline'}
                   size={20}
                   color="#668085"
                 />
@@ -162,7 +158,7 @@ export default function LoginScreen() {
             <Text style={styles.footerText}>Don&apos;t have an account?</Text>
             <Pressable
               onPress={() => {
-                router.push("/register");
+                router.push('/register');
               }}
               hitSlop={10}
             >
@@ -178,28 +174,28 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: "#f4f7f2",
+    backgroundColor: '#f4f7f2',
   },
   container: {
     flex: 1,
-    justifyContent: "center",
+    justifyContent: 'center',
     paddingHorizontal: 24,
     paddingVertical: 20,
-    backgroundColor: "#f4f7f2",
+    backgroundColor: '#f4f7f2',
   },
   hero: {
     marginBottom: 28,
-    alignItems: "center",
+    alignItems: 'center',
   },
   logoBadge: {
     width: 64,
     height: 64,
     borderRadius: 20,
-    backgroundColor: "#e8fff4",
-    alignItems: "center",
-    justifyContent: "center",
+    backgroundColor: '#e8fff4',
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 16,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   logoImage: {
     width: 44,
@@ -207,26 +203,26 @@ const styles = StyleSheet.create({
   },
   brand: {
     fontSize: 32,
-    fontWeight: "800",
-    color: "#11261f",
+    fontWeight: '800',
+    color: '#11261f',
     marginBottom: 10,
-    textAlign: "center",
+    textAlign: 'center',
   },
   subtitle: {
     fontSize: 15,
     lineHeight: 22,
-    color: "#5f7477",
+    color: '#5f7477',
     maxWidth: 320,
-    textAlign: "center",
+    textAlign: 'center',
   },
   card: {
-    backgroundColor: "#ffffff",
+    backgroundColor: '#ffffff',
     borderRadius: 28,
     padding: 22,
-    width: "100%",
+    width: '100%',
     maxWidth: 440,
-    alignSelf: "center",
-    shadowColor: "#0a2218",
+    alignSelf: 'center',
+    shadowColor: '#0a2218',
     shadowOpacity: 0.08,
     shadowRadius: 24,
     shadowOffset: { width: 0, height: 12 },
@@ -234,14 +230,14 @@ const styles = StyleSheet.create({
   },
   cardTitle: {
     fontSize: 24,
-    fontWeight: "700",
-    color: "#11261f",
+    fontWeight: '700',
+    color: '#11261f',
     marginBottom: 8,
   },
   cardDescription: {
     fontSize: 14,
     lineHeight: 21,
-    color: "#62787b",
+    color: '#62787b',
     marginBottom: 24,
   },
   inputGroup: {
@@ -249,50 +245,44 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 13,
-    fontWeight: "600",
-    color: "#28433c",
+    fontWeight: '600',
+    color: '#28433c',
     marginBottom: 8,
   },
   inputWrapper: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
     borderWidth: 1,
-    borderColor: "#d6e4df",
+    borderColor: '#d6e4df',
     borderRadius: 18,
     paddingHorizontal: 16,
-    paddingVertical: 14,
-    backgroundColor: "#f9fcfa",
+    minHeight: 54,
+    backgroundColor: '#f9fcfa',
   },
   inputWrapperFocused: {
-    borderColor: "#23f056",
-    backgroundColor: "#ffffff",
-    shadowColor: "#23f056",
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 2,
+    borderColor: '#23f056',
+    backgroundColor: '#ffffff',
   },
   inputWrapperError: {
-    borderColor: "#e05757",
+    borderColor: '#e05757',
   },
   input: {
     flex: 1,
     fontSize: 15,
-    color: "#11261f",
+    color: '#11261f',
   },
   fieldError: {
     marginTop: 6,
     fontSize: 12,
-    color: "#c43d3d",
-    fontWeight: "600",
+    color: '#c43d3d',
+    fontWeight: '600',
   },
   loginButton: {
     marginTop: 8,
-    backgroundColor: "#23f056",
+    backgroundColor: '#23f056',
     borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
     paddingVertical: 16,
     minHeight: 52,
   },
@@ -301,28 +291,28 @@ const styles = StyleSheet.create({
   },
   loginButtonText: {
     fontSize: 16,
-    fontWeight: "700",
-    color: "#093814",
+    fontWeight: '700',
+    color: '#093814',
   },
   formError: {
     marginTop: 10,
     fontSize: 12,
-    color: "#c43d3d",
-    fontWeight: "600",
-    textAlign: "center",
+    color: '#c43d3d',
+    fontWeight: '600',
+    textAlign: 'center',
   },
   footerRow: {
-    flexDirection: "row",
-    justifyContent: "center",
+    flexDirection: 'row',
+    justifyContent: 'center',
     marginTop: 18,
   },
   footerText: {
     fontSize: 13,
-    color: "#698084",
+    color: '#698084',
   },
   footerLink: {
     fontSize: 13,
-    color: "#00a86b",
-    fontWeight: "700",
+    color: '#00a86b',
+    fontWeight: '700',
   },
 });

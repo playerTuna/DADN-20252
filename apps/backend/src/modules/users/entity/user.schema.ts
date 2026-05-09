@@ -10,6 +10,12 @@ export class User {
 
   @Prop({ required: true })
   passwordHash!: string;
+
+  @Prop({ trim: true, default: "" })
+  displayName!: string;
+
+  @Prop({ type: Object, default: () => ({}) })
+  deviceSettings!: Record<string, boolean>;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

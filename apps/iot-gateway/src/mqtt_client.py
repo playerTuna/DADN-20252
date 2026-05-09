@@ -76,7 +76,7 @@ class MqttClient:
 
     def publish(self, key: LogicalFeedKey, value: str) -> None:
         topic = adafruit_topic(key)
-        logger.debug(f"Publishing to '{topic}': {value}")
+        logger.info(f"Publishing telemetry to topic '{topic}'")
         self._client.publish(topic, payload=value, qos=0, retain=False)
 
     def _handle_connect(self, client, userdata, flags, rc, properties=None) -> None:  # noqa: ANN001
@@ -85,6 +85,7 @@ class MqttClient:
             return
 
         logger.info("Successfully connected to MQTT broker.")
+        logger.info(f"Gateway subscribe logical keys: {', '.join(self._cfg.subscribe)}")
         topics = [adafruit_topic(k) for k in self._cfg.subscribe]
         for t in topics:
             logger.info(f"Subscribing to topic: {t}")
@@ -93,5 +94,5 @@ class MqttClient:
     def _handle_message(self, client, userdata, msg) -> None:  # noqa: ANN001
         topic = str(msg.topic)
         payload = msg.payload.decode("utf-8", errors="replace")
-        logger.debug(f"Received message on topic '{topic}': {payload}")
+        logger.info(f"Received MQTT message on topic '{topic}'")
         self._on_message(topic, payload)

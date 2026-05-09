@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
-import { HydratedDocument } from "mongoose";
+import { HydratedDocument, Types } from "mongoose";
 import { LogicalFeedKey } from "../../mqtt/mqtt.topics";
+import { User } from "../../users/entity/user.schema";
 
 export type CommandLogDocument = HydratedDocument<CommandLog>;
 
@@ -15,14 +16,24 @@ export class CommandLog {
   @Prop({ required: true })
   payload!: string;
 
+  @Prop({ type: Types.ObjectId, ref: User.name, index: true })
+  userId?: Types.ObjectId;
+
+  @Prop({
+    type: String,
+    enum: ["manual", "automation"],
+    index: true,
+  })
+  source?: "manual" | "automation";
+
   @Prop({
     required: true,
     type: String,
-    enum: ["sent", "acked", "failed"],
+    enum: ["sent", "acked", "failed", "timeout"],
     default: "sent",
     index: true,
   })
-  status!: "sent" | "acked" | "failed";
+  status!: "sent" | "acked" | "failed" | "timeout";
 
   @Prop()
   error?: string;
@@ -42,3 +53,4 @@ export class CommandLog {
 
 export const CommandLogSchema = SchemaFactory.createForClass(CommandLog);
 CommandLogSchema.index({ target: 1, issuedAt: -1 });
+CommandLogSchema.index({ userId: 1, issuedAt: -1 });

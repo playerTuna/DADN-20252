@@ -18,6 +18,27 @@ LogicalFeedKey: TypeAlias = Literal[
 
 ALL_LOGICAL_KEYS: list[LogicalFeedKey] = list(get_args(LogicalFeedKey))
 
+LOGICAL_KEY_ALIASES: dict[str, LogicalFeedKey] = {
+    "air-humidity": "air_humidity",
+    "soil-humidity": "soil_humidity",
+    "water-pump": "pump",
+}
+
+SERIAL_KEY_ALIASES: dict[str, LogicalFeedKey] = {
+    "temperature": "temp",
+    "humi": "air_humidity",
+    "humidity": "air_humidity",
+    "air-humidity": "air_humidity",
+    "airhumidity": "air_humidity",
+    "soil": "soil_humidity",
+    "soil_humi": "soil_humidity",
+    "soil-humi": "soil_humidity",
+    "soilhumidity": "soil_humidity",
+    "soil-moisture": "soil_humidity",
+    "lux": "light",
+    "water-pump": "pump",
+}
+
 FEED_KEY_MAPPING: dict[LogicalFeedKey, tuple[str, str]] = {
     "temp": ("FEED_TEMP_KEY", "yolo-farm-temp"),
     "air_humidity": ("FEED_AIR_HUMIDITY_KEY", "yolo-farm-air-humidity"),
@@ -41,6 +62,35 @@ def get_feed_key(logical_key: LogicalFeedKey) -> str:
     return os.getenv(env_var_name, default_value).strip()
 
 
+def normalize_logical_key(value: str | None) -> LogicalFeedKey | None:
+    if not value:
+        return None
+
+    key = value.strip().lower()
+    if not key:
+        return None
+
+    normalized = LOGICAL_KEY_ALIASES.get(key, key)
+    if normalized in ALL_LOGICAL_KEYS:
+        return normalized  # type: ignore[return-value]
+    return None
+
+
+def normalize_serial_key(value: str | None) -> LogicalFeedKey | None:
+    normalized = normalize_logical_key(value)
+    if normalized:
+        return normalized
+
+    if not value:
+        return None
+
+    key = value.strip().lower()
+    if not key:
+        return None
+
+    return SERIAL_KEY_ALIASES.get(key)
+
+
 def adafruit_topic(logical_key: LogicalFeedKey) -> str:
     """
     Constructs the full MQTT topic string for a given logical key to be used with Adafruit IO.
@@ -61,7 +111,11 @@ def parse_keys_csv(
     if not csv_string:
         return []
 
-    keys_from_csv = {key.strip().lower() for key in csv_string.split(",")}
+    keys_from_csv = {
+        normalized
+        for key in csv_string.split(",")
+        if (normalized := normalize_logical_key(key)) is not None
+    }
 
     # Filter to ensure only allowed keys are returned.
     valid_keys = [

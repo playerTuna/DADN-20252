@@ -7,6 +7,7 @@ import {
 import mqtt, { MqttClient } from "mqtt";
 import { TelemetryService } from "../telemetry/telemetry.service";
 import { CommandLogService } from "../command/command-log.service";
+import { UsersService } from "../users/users.service";
 import {
   ALL_LOGICAL_KEYS,
   getAdafruitFeedTopic,
@@ -14,22 +15,25 @@ import {
   getSubscribeKeys,
   LogicalFeedKey,
 } from "./mqtt.topics";
+import { logBackendEnvSource } from "./runtime-env";
 
 @Injectable()
 export class MqttService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(MqttService.name);
   private client: MqttClient | null = null;
-  // Create a reverse mapping for efficient lookups
-  private readonly reverseFeedKeyMap = new Map(
-    ALL_LOGICAL_KEYS.map((lk) => [getFeedKey(lk), lk]),
-  );
+  private reverseFeedKeyMap = new Map<string, LogicalFeedKey>();
 
   constructor(
     private readonly telemetryService: TelemetryService,
     private readonly commandLogService: CommandLogService,
+    private readonly usersService: UsersService,
   ) {}
 
   onModuleInit() {
+    logBackendEnvSource(this.logger, "mqtt");
+    this.reverseFeedKeyMap = new Map(
+      ALL_LOGICAL_KEYS.map((lk) => [getFeedKey(lk), lk]),
+    );
     const broker = process.env.ADAFRUIT_IO_BROKER ?? "io.adafruit.com";
     const port = Number(process.env.ADAFRUIT_IO_PORT ?? 1883);
     const useTls =
@@ -59,6 +63,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
       this.logger.log(`MQTT connected: ${url}`);
 
       const keys = getSubscribeKeys();
+      this.logger.log(`MQTT subscribe logical keys: ${keys.join(", ")}`);
       const topics = keys.map(getAdafruitFeedTopic);
       this.client?.subscribe(topics, { qos: 0 }, (err) => {
         if (err)
@@ -86,7 +91,9 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
   }
 
   async publish(key: LogicalFeedKey, value: string) {
-    if (!this.client) throw new Error("MQTT client not connected");
+    if (!this.client || !this.client.connected) {
+      throw new Error("MQTT client not connected");
+    }
     const topic = getAdafruitFeedTopic(key);
     await new Promise<void>((resolve, reject) => {
       this.client?.publish(topic, value, { qos: 0, retain: false }, (err) => {
@@ -94,6 +101,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         else resolve();
       });
     });
+    this.logger.log(`MQTT published command/state: ${key} -> ${topic}`);
   }
 
   async publishWithRetry(key: LogicalFeedKey, value: string, retries = 3) {
@@ -126,7 +134,12 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
 
     const feedKey = topic.slice(prefix.length);
     const logical = this.resolveLogicalKeyFromFeedKey(feedKey);
-    if (!logical) return;
+    if (!logical) {
+      this.logger.warn(`MQTT received unmapped feed key: ${feedKey}`);
+      return;
+    }
+
+    this.logger.log(`MQTT telemetry received: ${logical} <- ${feedKey}`);
 
     await this.telemetryService.ingestFromMqtt({
       logicalKey: logical,
@@ -147,30 +160,94 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
 
   private async tryHandleAckMessage(message: string) {
     const trimmed = message.trim();
-    // Support ACK payload formats:
-    // 1) ACK:<commandId>
-    // 2) ACK:<commandId>:<anything>
-    // 3) {"ackCommandId":"...","status":"ok"}
+    // Backward-compatible legacy ACK parsing.
     if (trimmed.startsWith("ACK:")) {
       const parts = trimmed.split(":");
       const commandId = parts[1]?.trim();
       if (commandId) {
-        await this.commandLogService.markAcked(commandId, trimmed, new Date());
+        const command = await this.commandLogService.markAcked(
+          commandId,
+          trimmed,
+          new Date(),
+        );
+        if (command?.userId) {
+          await this.usersService.applyHardwareAck({
+            userId: String(command.userId),
+            deviceId: command.target,
+            timestamp: new Date(),
+            commandStatus: "acked",
+          });
+        }
       }
       return;
     }
 
     try {
-      const parsed = JSON.parse(trimmed) as { ackCommandId?: string };
-      if (parsed?.ackCommandId) {
-        await this.commandLogService.markAcked(
-          parsed.ackCommandId,
-          trimmed,
-          new Date(),
-        );
+      const parsed = JSON.parse(trimmed) as {
+        deviceId?: string;
+        commandId?: string;
+        ackCommandId?: string;
+        power?: boolean;
+        status?: string;
+        timestamp?: string;
+        connectionStatus?: "online" | "offline" | "unknown";
+      };
+      const commandId = parsed.commandId ?? parsed.ackCommandId;
+      const deviceId = parsed.deviceId;
+      const ackTime = parsed.timestamp ? new Date(parsed.timestamp) : new Date();
+      const isValidAckTime = Number.isNaN(ackTime.getTime()) ? new Date() : ackTime;
+      const ackStatus = (parsed.status ?? "ok").toLowerCase();
+
+      if (commandId) {
+        const existingCommand = await this.commandLogService.findByCommandId(commandId);
+        const resolvedDeviceId = deviceId ?? existingCommand?.target;
+
+        if (ackStatus === "ok" || ackStatus === "acked") {
+          const command = await this.commandLogService.markAcked(
+            commandId,
+            trimmed,
+            isValidAckTime,
+          );
+          if (resolvedDeviceId) {
+            await this.usersService.applyHardwareAck({
+              userId: command?.userId ? String(command.userId) : undefined,
+              deviceId: resolvedDeviceId,
+              power: typeof parsed.power === "boolean" ? parsed.power : undefined,
+              timestamp: isValidAckTime,
+              commandStatus: "acked",
+              connectionStatus: parsed.connectionStatus ?? "online",
+            });
+          }
+          return;
+        }
+
+        if (ackStatus === "failed" || ackStatus === "error") {
+          await this.commandLogService.markFailed(commandId, trimmed);
+          if (existingCommand?.userId && resolvedDeviceId) {
+            await this.usersService.applyHardwareAck({
+              userId: String(existingCommand.userId),
+              deviceId: resolvedDeviceId,
+              power: typeof parsed.power === "boolean" ? parsed.power : undefined,
+              timestamp: isValidAckTime,
+              commandStatus: "failed",
+              connectionStatus: parsed.connectionStatus ?? "online",
+            });
+          }
+          return;
+        }
+      }
+
+      if (deviceId) {
+        await this.usersService.applyHardwareAck({
+          deviceId,
+          power: typeof parsed.power === "boolean" ? parsed.power : undefined,
+          timestamp: isValidAckTime,
+          connectionStatus: parsed.connectionStatus ?? "online",
+        });
       }
     } catch {
-      // ignore non-JSON status messages
+      // TODO: gateway should publish JSON ACK/status on the existing `status` feed:
+      // {"deviceId":"pump","commandId":"cmd_xxx","power":true,"status":"ok","timestamp":"2026-04-28T10:00:03Z"}
     }
   }
 }
