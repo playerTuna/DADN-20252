@@ -1,12 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import logoUrl from '../../../Frontend/assets/images/logo.png';
-import {
-  login,
-  register,
-  validateEmailInput,
-  validatePasswordInput,
-} from '../services/auth';
+import { login, register, validateEmailInput, validatePasswordInput } from '../services/auth';
 
 type AuthPageProps = {
   mode: 'login' | 'register';
@@ -26,15 +21,22 @@ export function AuthPage({ mode }: AuthPageProps) {
   const validate = () => {
     const emailError = validateEmailInput(email);
     if (emailError) return emailError;
+
     const passwordError = validatePasswordInput(password);
     if (passwordError) return passwordError;
-    if (isRegister && confirmPassword !== password) return 'Passwords do not match.';
+
+    if (isRegister && confirmPassword !== password) {
+      return 'Passwords do not match.';
+    }
+
     return null;
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+
     const validation = validate();
+
     if (validation) {
       setError(validation);
       return;
@@ -42,12 +44,14 @@ export function AuthPage({ mode }: AuthPageProps) {
 
     setSubmitting(true);
     setError(null);
+
     try {
       if (isRegister) {
         await register(email, password);
       } else {
         await login(email, password);
       }
+
       navigate('/home', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Authentication failed.');
@@ -58,24 +62,24 @@ export function AuthPage({ mode }: AuthPageProps) {
 
   return (
     <main className="auth-page">
-      <section className="auth-hero" aria-labelledby="auth-title">
-        <div className="auth-logo-wrap">
-          <img src={logoUrl} alt="Smart Farm" className="auth-logo" />
-        </div>
-        <p className="eyebrow">Smart Farm</p>
-        <h1 id="auth-title">{isRegister ? 'Create account' : 'Welcome back'}</h1>
-        <p className="auth-copy">
-          Monitor farm conditions, manage devices, and keep automation settings close at hand.
-        </p>
-      </section>
-
       <form className="auth-card" onSubmit={handleSubmit}>
-        <div>
-          <h2>{isRegister ? 'Register' : 'Sign in'}</h2>
-          <p>{isRegister ? 'Set up your dashboard access.' : 'Continue to your dashboard.'}</p>
+        <div className="auth-header">
+          <div className="auth-logo-wrap">
+            <img src={logoUrl} alt="Smart Farm" className="auth-logo" />
+          </div>
+
+          <p className="auth-brand">Smart Farm</p>
+
+          <h1>{isRegister ? 'Create account' : 'Welcome back'}</h1>
+
+          <p className="auth-subtitle">
+            {isRegister
+              ? 'Create your account to manage your farm.'
+              : 'Sign in to continue to your dashboard.'}
+          </p>
         </div>
 
-        <label className="form-field">
+        <label className="auth-field">
           <span>Email</span>
           <input
             type="email"
@@ -83,27 +87,35 @@ export function AuthPage({ mode }: AuthPageProps) {
             onChange={(event) => setEmail(event.target.value)}
             placeholder="farmer@smartfarm.vn"
             autoComplete="email"
+            disabled={submitting}
           />
         </label>
 
-        <label className="form-field">
+        <label className="auth-field">
           <span>Password</span>
-          <div className="password-input">
+
+          <div className="auth-password-row">
             <input
               type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               placeholder="Enter your password"
               autoComplete={isRegister ? 'new-password' : 'current-password'}
+              disabled={submitting}
             />
-            <button type="button" onClick={() => setShowPassword((current) => !current)}>
+
+            <button
+              type="button"
+              onClick={() => setShowPassword((current) => !current)}
+              disabled={submitting}
+            >
               {showPassword ? 'Hide' : 'Show'}
             </button>
           </div>
         </label>
 
         {isRegister ? (
-          <label className="form-field">
+          <label className="auth-field">
             <span>Confirm password</span>
             <input
               type={showPassword ? 'text' : 'password'}
@@ -111,13 +123,14 @@ export function AuthPage({ mode }: AuthPageProps) {
               onChange={(event) => setConfirmPassword(event.target.value)}
               placeholder="Repeat your password"
               autoComplete="new-password"
+              disabled={submitting}
             />
           </label>
         ) : null}
 
         {error ? <div className="form-error">{error}</div> : null}
 
-        <button className="primary-button" type="submit" disabled={submitting}>
+        <button className="auth-submit-button" type="submit" disabled={submitting}>
           {submitting ? 'Please wait...' : isRegister ? 'Create account' : 'Sign in'}
         </button>
 

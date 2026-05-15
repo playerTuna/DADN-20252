@@ -21,6 +21,7 @@
   "description": "",
   "dependencies": {
     "core-js-compat": "^3.49.0",
+    "expo": "~54.0.34",
     "react-native-svg": "15.12.1"
   }
 }

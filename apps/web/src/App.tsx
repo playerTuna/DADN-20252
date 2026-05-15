@@ -6,6 +6,7 @@ import { DevicesPage } from './pages/DevicesPage';
 import { HomePage } from './pages/HomePage';
 import { SettingsPage } from './pages/SettingsPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
+import { ProfilePage } from './pages/ProfilePage';
 export function App() {
   return (
     <Routes>
@@ -22,6 +23,7 @@ export function App() {
         <Route path="/devices" element={<DevicesPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
+        <Route path="/profile" element={<ProfilePage />} />
       </Route>
       <Route path="*" element={<Navigate to="/home" replace />} />
     </Routes>

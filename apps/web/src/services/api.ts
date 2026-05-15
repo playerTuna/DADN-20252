@@ -12,6 +12,11 @@ export type UserProfile = {
   id?: string;
 };
 
+export async function updateUserProfile(
+  payload: Pick<UserProfile, 'displayName'>
+): Promise<UserProfile> {
+  return apiPatch<UserProfile>('/me', payload);
+}
 export type EditableSettings = DeviceSettings;
 
 type LatestTelemetry = {

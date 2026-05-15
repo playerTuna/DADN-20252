@@ -3,32 +3,18 @@ import { StatusMessage } from '../components/StatusMessage';
 import { Toggle } from '../components/Toggle';
 import {
   getAutomationRules,
-  getSettings,
   updateAutomationRule,
-  updateUserSettings,
   type AutomationRule,
   type AutomationSensorKey,
-  type EditableSettings,
 } from '../services/api';
 
-const SETTING_LABELS: Record<string, string> = {
-  'pump-1': 'Pump 1 default state',
-  'pump-2': 'Pump 2 default state',
-  'led-1': 'LED 1 default state',
-  'led-2': 'LED 2 default state',
-  'led-3': 'LED 3 default state',
-  'schedule-1': 'Morning cycle default state',
-  'schedule-2': 'Cooling fan default state',
-  'schedule-3': 'Night lamp default state',
-  'dev-1': 'Pump A default state',
-  'dev-2': 'Pump B default state',
-  'dev-3': 'Grow Light 1 default state',
-  'dev-4': 'Grow Light 2 default state',
-};
+type AutomationDevice = 'pump' | 'fan' | 'light';
+
+type AutomationTarget = 'pump' | 'fan' | 'rgb';
 
 type RuleForm = {
   deviceId: string;
-  target: 'pump' | 'fan' | 'rgb';
+  target: AutomationTarget;
   sensorKey: AutomationSensorKey;
   enabled: boolean;
   turnOnWhen: { operator: '<' | '>'; value: number };
@@ -37,7 +23,7 @@ type RuleForm = {
   offPayload: string;
 };
 
-const DEFAULT_RULES: Record<'pump' | 'fan', RuleForm> = {
+const DEFAULT_RULES: Record<AutomationDevice, RuleForm> = {
   pump: {
     deviceId: 'pump',
     target: 'pump',
@@ -58,18 +44,56 @@ const DEFAULT_RULES: Record<'pump' | 'fan', RuleForm> = {
     onPayload: 'ON',
     offPayload: 'OFF',
   },
+  light: {
+    deviceId: 'rgb',
+    target: 'rgb',
+    sensorKey: 'light',
+    enabled: false,
+    turnOnWhen: { operator: '<', value: 35 },
+    turnOffWhen: { operator: '>', value: 65 },
+    onPayload: '255,255,255',
+    offPayload: '0,0,0',
+  },
 };
 
-const SENSOR_OPTIONS: { value: AutomationSensorKey; label: string }[] = [
-  { value: 'soilMoisture', label: 'Soil moisture' },
-  { value: 'temperature', label: 'Temperature' },
-  { value: 'light', label: 'Light' },
-];
+const RULE_META: Record<
+  AutomationDevice,
+  {
+    title: string;
+    description: string;
+    backendDeviceId: 'pump' | 'fan' | 'rgb';
+    successMessage: string;
+    errorMessage: string;
+  }
+> = {
+  pump: {
+    title: 'Pump automation',
+    description: 'Automatically control pump based on soil moisture.',
+    backendDeviceId: 'pump',
+    successMessage: 'Pump automation updated.',
+    errorMessage: 'Unable to save pump automation.',
+  },
+  fan: {
+    title: 'Fan automation',
+    description: 'Automatically control fan based on temperature.',
+    backendDeviceId: 'fan',
+    successMessage: 'Fan automation updated.',
+    errorMessage: 'Unable to save fan automation.',
+  },
+  light: {
+    title: 'Light automation',
+    description: 'Automatically control grow light based on light intensity.',
+    backendDeviceId: 'rgb',
+    successMessage: 'Light automation updated.',
+    errorMessage: 'Unable to save light automation.',
+  },
+};
 
 const OPERATOR_OPTIONS: ('<' | '>')[] = ['<', '>'];
 
 function normalizeRule(incoming: AutomationRule | undefined, fallback: RuleForm): RuleForm {
   if (!incoming) return fallback;
+
   return {
     deviceId: incoming.deviceId,
     target: incoming.target,
@@ -83,8 +107,11 @@ function normalizeRule(incoming: AutomationRule | undefined, fallback: RuleForm)
       operator: incoming.turnOffWhen.operator,
       value: Number(incoming.turnOffWhen.value),
     },
-    onPayload: incoming.onPayload ?? 'ON',
-    offPayload: incoming.offPayload ?? 'OFF',
+
+    // Payload không hiện trên UI nữa, nhưng vẫn giữ để backend/device dùng.
+    // Nếu backend trả thiếu hoặc rỗng thì dùng default theo từng device.
+    onPayload: incoming.onPayload?.trim() ? incoming.onPayload : fallback.onPayload,
+    offPayload: incoming.offPayload?.trim() ? incoming.offPayload : fallback.offPayload,
   };
 }
 
@@ -92,9 +119,7 @@ function ruleValidationError(rule: RuleForm): string | null {
   if (!Number.isFinite(rule.turnOnWhen.value) || !Number.isFinite(rule.turnOffWhen.value)) {
     return 'Threshold values must be valid numbers.';
   }
-  if (rule.onPayload.trim().length === 0 || rule.offPayload.trim().length === 0) {
-    return 'Payload values cannot be empty.';
-  }
+
   return null;
 }
 
@@ -106,13 +131,11 @@ type RuleEditorProps = {
   success: string | null;
   error: string | null;
   onEnabledChange: (next: boolean) => void;
-  onSensorChange: (next: AutomationSensorKey) => void;
   onThresholdChange: (
     key: 'turnOnWhen' | 'turnOffWhen',
     field: 'operator' | 'value',
     value: '<' | '>' | number
   ) => void;
-  onPayloadChange: (field: 'onPayload' | 'offPayload', value: string) => void;
   onSave: () => void;
 };
 
@@ -124,131 +147,156 @@ function RuleEditor({
   success,
   error,
   onEnabledChange,
-  onSensorChange,
   onThresholdChange,
-  onPayloadChange,
   onSave,
 }: RuleEditorProps) {
   return (
-    <section className="panel settings-panel">
-      <div className="section-heading">
+    <section className="panel settings-panel automation-panel">
+      <div className="section-heading automation-heading">
         <div>
           <h2>{title}</h2>
           <p>{description}</p>
         </div>
+
         <Toggle checked={rule.enabled} disabled={saving} onChange={onEnabledChange} />
       </div>
 
-      <div className="field-group">
-        <span className="field-label">Sensor source</span>
-        <div className="chip-row">
-          {SENSOR_OPTIONS.map((option) => {
-            const active = rule.sensorKey === option.value;
-            return (
+      <div className="automation-grid">
+        <div className="threshold-card">
+          <span className="field-label">Turn ON when</span>
+
+          <div className="operator-row">
+            {OPERATOR_OPTIONS.map((operator) => (
               <button
-                key={option.value}
+                key={`on-${operator}`}
                 type="button"
-                className={`chip ${active ? 'active' : ''}`}
+                className={`operator-button ${
+                  rule.turnOnWhen.operator === operator ? 'active' : ''
+                }`}
                 disabled={saving}
-                onClick={() => onSensorChange(option.value)}
+                onClick={() => onThresholdChange('turnOnWhen', 'operator', operator)}
               >
-                {option.label}
+                {operator}
               </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="settings-grid">
-        {(['turnOnWhen', 'turnOffWhen'] as const).map((key) => (
-          <div key={key} className="threshold-card">
-            <span className="field-label">{key === 'turnOnWhen' ? 'Turn ON when' : 'Turn OFF when'}</span>
-            <div className="operator-row">
-              {OPERATOR_OPTIONS.map((operator) => (
-                <button
-                  key={`${key}-${operator}`}
-                  type="button"
-                  className={`operator-button ${rule[key].operator === operator ? 'active' : ''}`}
-                  disabled={saving}
-                  onClick={() => onThresholdChange(key, 'operator', operator)}
-                >
-                  {operator}
-                </button>
-              ))}
-            </div>
-            <input
-              type="number"
-              value={rule[key].value}
-              disabled={saving}
-              onChange={(event) =>
-                onThresholdChange(key, 'value', Number(event.target.value || 0))
-              }
-            />
+            ))}
           </div>
-        ))}
 
-        <label className="form-field compact">
-          <span>ON payload</span>
           <input
-            value={rule.onPayload}
+            type="number"
+            value={rule.turnOnWhen.value}
             disabled={saving}
-            onChange={(event) => onPayloadChange('onPayload', event.target.value)}
+            placeholder="Value"
+            onChange={(event) => {
+              const nextValue = Number(event.target.value);
+              onThresholdChange('turnOnWhen', 'value', Number.isNaN(nextValue) ? 0 : nextValue);
+            }}
           />
-        </label>
+        </div>
 
-        <label className="form-field compact">
-          <span>OFF payload</span>
+        <div className="threshold-card">
+          <span className="field-label">Turn OFF when</span>
+
+          <div className="operator-row">
+            {OPERATOR_OPTIONS.map((operator) => (
+              <button
+                key={`off-${operator}`}
+                type="button"
+                className={`operator-button ${
+                  rule.turnOffWhen.operator === operator ? 'active' : ''
+                }`}
+                disabled={saving}
+                onClick={() => onThresholdChange('turnOffWhen', 'operator', operator)}
+              >
+                {operator}
+              </button>
+            ))}
+          </div>
+
           <input
-            value={rule.offPayload}
+            type="number"
+            value={rule.turnOffWhen.value}
             disabled={saving}
-            onChange={(event) => onPayloadChange('offPayload', event.target.value)}
+            placeholder="Value"
+            onChange={(event) => {
+              const nextValue = Number(event.target.value);
+              onThresholdChange('turnOffWhen', 'value', Number.isNaN(nextValue) ? 0 : nextValue);
+            }}
           />
-        </label>
+        </div>
       </div>
 
       {error ? <StatusMessage>{error}</StatusMessage> : null}
       {success ? <StatusMessage tone="success">{success}</StatusMessage> : null}
 
-      <button type="button" className="secondary-button" disabled={saving} onClick={onSave}>
+      <button
+        type="button"
+        className="secondary-button automation-save-button"
+        disabled={saving}
+        onClick={onSave}
+      >
         {saving ? 'Saving...' : 'Save rule'}
       </button>
     </section>
   );
 }
-
+function SettingsHeroIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5z" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6V20a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-.6 1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1H4a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 .6-1 1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6V4a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 .6 1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.14.35.35.69.6 1H20a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-.51 1z" />
+    </svg>
+  );
+}
 export function SettingsPage() {
-  const [settings, setSettings] = useState<EditableSettings | null>(null);
-  const [pumpRule, setPumpRule] = useState<RuleForm>(DEFAULT_RULES.pump);
-  const [fanRule, setFanRule] = useState<RuleForm>(DEFAULT_RULES.fan);
+  const [rules, setRules] = useState<Record<AutomationDevice, RuleForm>>(DEFAULT_RULES);
 
   const [loading, setLoading] = useState(true);
-  const [settingsSaving, setSettingsSaving] = useState(false);
-  const [ruleSaving, setRuleSaving] = useState<'pump' | 'fan' | null>(null);
+  const [ruleSaving, setRuleSaving] = useState<AutomationDevice | null>(null);
 
   const [error, setError] = useState<string | null>(null);
-  const [settingsSuccess, setSettingsSuccess] = useState<string | null>(null);
-  const [pumpSuccess, setPumpSuccess] = useState<string | null>(null);
-  const [fanSuccess, setFanSuccess] = useState<string | null>(null);
-  const [pumpError, setPumpError] = useState<string | null>(null);
-  const [fanError, setFanError] = useState<string | null>(null);
+
+  const [success, setSuccess] = useState<Record<AutomationDevice, string | null>>({
+    pump: null,
+    fan: null,
+    light: null,
+  });
+
+  const [ruleErrors, setRuleErrors] = useState<Record<AutomationDevice, string | null>>({
+    pump: null,
+    fan: null,
+    light: null,
+  });
 
   useEffect(() => {
     let cancelled = false;
 
     void (async () => {
       try {
-        const [nextSettings, rules] = await Promise.all([getSettings(), getAutomationRules()]);
+        const automationRules = await getAutomationRules();
+
         if (cancelled) return;
 
-        setSettings(nextSettings);
-        setPumpRule(normalizeRule(rules.find((rule) => rule.deviceId === 'pump'), DEFAULT_RULES.pump));
-        setFanRule(normalizeRule(rules.find((rule) => rule.deviceId === 'fan'), DEFAULT_RULES.fan));
+        const pump = automationRules.find((rule) => rule.deviceId === 'pump');
+        const fan = automationRules.find((rule) => rule.deviceId === 'fan');
+        const light = automationRules.find((rule) => rule.deviceId === 'rgb');
+
+        setRules({
+          pump: normalizeRule(pump, DEFAULT_RULES.pump),
+          fan: normalizeRule(fan, DEFAULT_RULES.fan),
+          light: normalizeRule(light, DEFAULT_RULES.light),
+        });
+
         setError(null);
       } catch (err) {
         console.log('Settings load failed', err);
-        if (!cancelled) setError('Unable to load settings.');
+
+        if (!cancelled) {
+          setError('Unable to load automation settings.');
+        }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     })();
 
@@ -257,207 +305,184 @@ export function SettingsPage() {
     };
   }, []);
 
-  const handleToggleSetting = (key: string, value: boolean) => {
-    setSettings((current) => (current ? { ...current, [key]: value } : current));
-    setSettingsSuccess(null);
+  const updateRuleState = (device: AutomationDevice, updater: (current: RuleForm) => RuleForm) => {
+    setRules((current) => ({
+      ...current,
+      [device]: updater(current[device]),
+    }));
+
+    setSuccess((current) => ({
+      ...current,
+      [device]: null,
+    }));
+
+    setRuleErrors((current) => ({
+      ...current,
+      [device]: null,
+    }));
   };
 
-  const handleSaveSettings = async () => {
-    if (!settings) return;
-    setSettingsSaving(true);
-    setError(null);
-    setSettingsSuccess(null);
-
-    try {
-      setSettings(await updateUserSettings(settings));
-      setSettingsSuccess('Settings updated.');
-    } catch (err) {
-      console.log('Settings save failed', err);
-      setError('Unable to save settings.');
-    } finally {
-      setSettingsSaving(false);
-    }
-  };
-
-  const updateRuleState = (device: 'pump' | 'fan', updater: (current: RuleForm) => RuleForm) => {
-    if (device === 'pump') {
-      setPumpRule((current) => updater(current));
-      setPumpSuccess(null);
-      setPumpError(null);
-      return;
-    }
-    setFanRule((current) => updater(current));
-    setFanSuccess(null);
-    setFanError(null);
-  };
-
-  const saveRule = async (device: 'pump' | 'fan') => {
-    const rule = device === 'pump' ? pumpRule : fanRule;
+  const saveRuleToBackend = async (
+    device: AutomationDevice,
+    rule: RuleForm,
+    customSuccessMessage?: string
+  ) => {
     const validation = ruleValidationError(rule);
 
     if (validation) {
-      if (device === 'pump') setPumpError(validation);
-      else setFanError(validation);
+      setRuleErrors((current) => ({
+        ...current,
+        [device]: validation,
+      }));
       return;
     }
 
+    const meta = RULE_META[device];
+
     setRuleSaving(device);
-    if (device === 'pump') {
-      setPumpError(null);
-      setPumpSuccess(null);
-    } else {
-      setFanError(null);
-      setFanSuccess(null);
-    }
+
+    setSuccess((current) => ({
+      ...current,
+      [device]: null,
+    }));
+
+    setRuleErrors((current) => ({
+      ...current,
+      [device]: null,
+    }));
 
     try {
-      const updatedRules = await updateAutomationRule(device, {
+      const updatedRules = await updateAutomationRule(meta.backendDeviceId, {
         enabled: rule.enabled,
         sensorKey: rule.sensorKey,
         turnOnWhen: rule.turnOnWhen,
         turnOffWhen: rule.turnOffWhen,
+
+        // Payload ẩn khỏi UI nhưng vẫn gửi cho backend/device.
         onPayload: rule.onPayload,
         offPayload: rule.offPayload,
       });
 
-      const updated = updatedRules.find((item) => item.deviceId === device);
+      const updated = updatedRules.find((item) => item.deviceId === meta.backendDeviceId);
+
       if (updated) {
-        const normalized = normalizeRule(
-          updated,
-          device === 'pump' ? DEFAULT_RULES.pump : DEFAULT_RULES.fan
-        );
-        if (device === 'pump') {
-          setPumpRule(normalized);
-          setPumpSuccess('Pump automation updated.');
-        } else {
-          setFanRule(normalized);
-          setFanSuccess('Fan automation updated.');
-        }
+        setRules((current) => ({
+          ...current,
+          [device]: normalizeRule(updated, DEFAULT_RULES[device]),
+        }));
       }
+
+      setSuccess((current) => ({
+        ...current,
+        [device]: customSuccessMessage ?? meta.successMessage,
+      }));
     } catch (err) {
       console.log('Rule save failed', err);
-      if (device === 'pump') setPumpError('Unable to save pump automation.');
-      else setFanError('Unable to save fan automation.');
+
+      setRuleErrors((current) => ({
+        ...current,
+        [device]: meta.errorMessage,
+      }));
     } finally {
       setRuleSaving(null);
     }
   };
 
+  const saveRule = async (device: AutomationDevice) => {
+    await saveRuleToBackend(device, rules[device]);
+  };
+
+  const toggleRuleEnabled = async (device: AutomationDevice, enabled: boolean) => {
+    const previousRule = rules[device];
+
+    const nextRule: RuleForm = {
+      ...previousRule,
+      enabled,
+    };
+
+    // Optimistic update: gạt toggle là UI đổi ngay.
+    setRules((current) => ({
+      ...current,
+      [device]: nextRule,
+    }));
+
+    setSuccess((current) => ({
+      ...current,
+      [device]: null,
+    }));
+
+    setRuleErrors((current) => ({
+      ...current,
+      [device]: null,
+    }));
+
+    const meta = RULE_META[device];
+
+    try {
+      await saveRuleToBackend(
+        device,
+        nextRule,
+        enabled ? `${meta.title} enabled.` : `${meta.title} disabled.`
+      );
+    } catch {
+      // Phòng trường hợp saveRuleToBackend bị throw ngoài dự kiến.
+      setRules((current) => ({
+        ...current,
+        [device]: previousRule,
+      }));
+    }
+  };
+
   return (
-    <div className="page-stack">
-      <header className="page-header">
+    <div className="page-stack settings-page-web">
+      <header className="settings-hero-card">
+        <div className="settings-hero-icon">
+          <SettingsHeroIcon />
+        </div>
+
         <div>
           <p className="eyebrow">Configuration</p>
           <h1>Settings</h1>
-          <p>Manage default controls and automation thresholds.</p>
+          <p>Manage automation thresholds for your smart farming devices.</p>
         </div>
+
         {loading ? <span className="spinner" /> : null}
       </header>
-
       {error ? <StatusMessage>{error}</StatusMessage> : null}
 
-      <section className="panel settings-panel">
-        <div className="section-heading">
-          <div>
-            <h2>Control defaults</h2>
-            <p>Saved default states for dashboard controls.</p>
-          </div>
-        </div>
-
-        {!loading && settings ? (
-          <div className="settings-list">
-            {Object.entries(settings).map(([key, value]) => (
-              <div key={key} className="settings-row">
-                <div>
-                  <strong>{SETTING_LABELS[key] ?? key}</strong>
-                  <span>{key}</span>
-                </div>
-                <Toggle
-                  checked={value}
-                  disabled={settingsSaving}
-                  onChange={(next) => handleToggleSetting(key, next)}
-                />
-              </div>
-            ))}
-          </div>
-        ) : null}
-
-        {settingsSuccess ? <StatusMessage tone="success">{settingsSuccess}</StatusMessage> : null}
-
-        <button
-          type="button"
-          className="secondary-button"
-          disabled={settingsSaving || !settings}
-          onClick={() => {
-            void handleSaveSettings();
-          }}
-        >
-          {settingsSaving ? 'Saving...' : 'Save settings'}
-        </button>
-      </section>
-
       {!loading ? (
-        <>
-          <RuleEditor
-            title="Pump automation"
-            description="Automatically control pump based on soil moisture."
-            rule={pumpRule}
-            saving={ruleSaving === 'pump'}
-            success={pumpSuccess}
-            error={pumpError}
-            onEnabledChange={(next) =>
-              updateRuleState('pump', (current) => ({ ...current, enabled: next }))
-            }
-            onSensorChange={(next) =>
-              updateRuleState('pump', (current) => ({ ...current, sensorKey: next }))
-            }
-            onThresholdChange={(key, field, value) =>
-              updateRuleState('pump', (current) => ({
-                ...current,
-                [key]: {
-                  ...current[key],
-                  [field]: value,
-                },
-              }))
-            }
-            onPayloadChange={(field, value) =>
-              updateRuleState('pump', (current) => ({ ...current, [field]: value }))
-            }
-            onSave={() => {
-              void saveRule('pump');
-            }}
-          />
+        <div className="automation-list">
+          {(['pump', 'fan', 'light'] as const).map((device) => {
+            const meta = RULE_META[device];
 
-          <RuleEditor
-            title="Fan automation"
-            description="Automatically control fan based on temperature."
-            rule={fanRule}
-            saving={ruleSaving === 'fan'}
-            success={fanSuccess}
-            error={fanError}
-            onEnabledChange={(next) =>
-              updateRuleState('fan', (current) => ({ ...current, enabled: next }))
-            }
-            onSensorChange={(next) =>
-              updateRuleState('fan', (current) => ({ ...current, sensorKey: next }))
-            }
-            onThresholdChange={(key, field, value) =>
-              updateRuleState('fan', (current) => ({
-                ...current,
-                [key]: {
-                  ...current[key],
-                  [field]: value,
-                },
-              }))
-            }
-            onPayloadChange={(field, value) =>
-              updateRuleState('fan', (current) => ({ ...current, [field]: value }))
-            }
-            onSave={() => {
-              void saveRule('fan');
-            }}
-          />
-        </>
+            return (
+              <RuleEditor
+                key={device}
+                title={meta.title}
+                description={meta.description}
+                rule={rules[device]}
+                saving={ruleSaving === device}
+                success={success[device]}
+                error={ruleErrors[device]}
+                onEnabledChange={(next) => {
+                  void toggleRuleEnabled(device, next);
+                }}
+                onThresholdChange={(key, field, value) =>
+                  updateRuleState(device, (current) => ({
+                    ...current,
+                    [key]: {
+                      ...current[key],
+                      [field]: value,
+                    },
+                  }))
+                }
+                onSave={() => {
+                  void saveRule(device);
+                }}
+              />
+            );
+          })}
+        </div>
       ) : null}
     </div>
   );
