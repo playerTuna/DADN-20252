@@ -43,7 +43,7 @@ export default function LoginScreen() {
       await login(email, password);
       router.replace('/home');
     } catch (e) {
-      setFormError(e instanceof Error ? e.message : 'Login failed');
+      setFormError(e instanceof Error ? e.message : 'Đăng nhập thất bại');
     } finally {
       setSubmitting(false);
     }
@@ -64,12 +64,12 @@ export default function LoginScreen() {
             />
           </View>
           <Text style={styles.brand}>Smart Farm</Text>
-          <Text style={styles.subtitle}>Monitor your farm status and control devices anytime.</Text>
+          <Text style={styles.subtitle}>Theo dõi nông trại và điều khiển thiết bị mọi lúc.</Text>
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Sign in</Text>
-          <Text style={styles.cardDescription}>Welcome back to your Smart Farm dashboard.</Text>
+          <Text style={styles.cardTitle}>Đăng nhập</Text>
+          <Text style={styles.cardDescription}>Chào mừng trở lại bảng điều khiển Smart Farm.</Text>
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Email</Text>
@@ -101,7 +101,7 @@ export default function LoginScreen() {
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Password</Text>
+            <Text style={styles.label}>Mật khẩu</Text>
             <View
               style={[
                 styles.inputWrapper,
@@ -111,7 +111,7 @@ export default function LoginScreen() {
             >
               <Ionicons name="lock-closed-outline" size={18} color="#668085" />
               <TextInput
-                placeholder="Enter your password"
+                placeholder="Nhập mật khẩu"
                 placeholderTextColor="#93a8ab"
                 secureTextEntry={!showPassword}
                 value={password}
@@ -126,7 +126,7 @@ export default function LoginScreen() {
               <Pressable
                 onPress={() => setShowPassword((s) => !s)}
                 hitSlop={10}
-                accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                accessibilityLabel={showPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
               >
                 <Ionicons
                   name={showPassword ? 'eye-off-outline' : 'eye-outline'}
@@ -148,21 +148,21 @@ export default function LoginScreen() {
             {submitting ? (
               <ActivityIndicator color="#093814" />
             ) : (
-              <Text style={styles.loginButtonText}>Sign in</Text>
+              <Text style={styles.loginButtonText}>Đăng nhập</Text>
             )}
           </Pressable>
 
           {formError ? <Text style={styles.formError}>{formError}</Text> : null}
 
           <View style={styles.footerRow}>
-            <Text style={styles.footerText}>Don&apos;t have an account?</Text>
+            <Text style={styles.footerText}>Chưa có tài khoản?</Text>
             <Pressable
               onPress={() => {
                 router.push('/register');
               }}
               hitSlop={10}
             >
-              <Text style={styles.footerLink}> Create account</Text>
+              <Text style={styles.footerLink}> Đăng ký</Text>
             </Pressable>
           </View>
         </View>

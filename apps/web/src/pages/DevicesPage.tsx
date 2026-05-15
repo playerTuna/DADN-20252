@@ -7,16 +7,7 @@ import {
   updateManagedDevicePower,
   type ManagedDevice,
 } from '../services/api';
-
-function formatDateTime(iso?: string | null) {
-  if (!iso) return '-';
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return '-';
-  return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-  })}`;
-}
+import { formatRelativeTime, translateConnectionStatus, translatePowerState } from '../utils/presentation';
 
 export function DevicesPage() {
   const [devices, setDevices] = useState<ManagedDevice[]>([]);
@@ -39,7 +30,7 @@ export function DevicesPage() {
         }
       } catch (err) {
         console.log('Devices load failed', err);
-        if (!cancelled) setError('Unable to load device data.');
+        if (!cancelled) setError('Không thể tải dữ liệu thiết bị.');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -66,6 +57,8 @@ export function DevicesPage() {
     [devices, search]
   );
 
+  const showSearchToolbar = devices.length > 5;
+
   const handlePower = async (deviceId: string, next: boolean) => {
     const snapshot = [...devices];
     setPendingPowerId(deviceId);
@@ -80,7 +73,7 @@ export function DevicesPage() {
     } catch (err) {
       console.log('Power command failed', err);
       setDevices(snapshot);
-      setError('Unable to send power command.');
+      setError('Không thể gửi lệnh nguồn.');
     } finally {
       setPendingPowerId(null);
     }
@@ -101,7 +94,7 @@ export function DevicesPage() {
     } catch (err) {
       console.log('Auto mode command failed', err);
       setDevices(snapshot);
-      setError('Unable to update automation mode.');
+      setError('Không thể cập nhật chế độ tự động.');
     } finally {
       setPendingModeId(null);
     }
@@ -111,29 +104,31 @@ export function DevicesPage() {
     <div className="page-stack">
       <header className="page-header">
         <div>
-          <p className="eyebrow">Device manager</p>
-          <h1>Devices</h1>
-          <p>{filteredDevices.length} devices available</p>
+          <p className="eyebrow">Quản lý thiết bị</p>
+          <h1>Thiết bị</h1>
+          <p>{filteredDevices.length} thiết bị khả dụng</p>
         </div>
         {loading ? <span className="spinner" /> : null}
       </header>
 
       {error ? <StatusMessage>{error}</StatusMessage> : null}
 
-      <div className="toolbar">
-        <label className="search-field">
-          <span>Search</span>
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search by name or ID"
-          />
-        </label>
-      </div>
+      {showSearchToolbar ? (
+        <div className="toolbar">
+          <label className="search-field">
+            <span>Tìm kiếm</span>
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Tìm theo tên hoặc ID"
+            />
+          </label>
+        </div>
+      ) : null}
 
       <section className="device-grid">
         {!loading && filteredDevices.length === 0 ? (
-          <div className="panel empty-panel">No devices found.</div>
+          <div className="panel empty-panel">Không tìm thấy thiết bị.</div>
         ) : null}
 
         {filteredDevices.map((device) => (
@@ -144,29 +139,49 @@ export function DevicesPage() {
                 <div>
                   <h2>{device.name}</h2>
                   <p>ID {device.id}</p>
+                  <div className="device-status-row">
+                    <span
+                      className={`status-dot ${device.connectionStatus === 'online' ? 'online' : 'offline'}`}
+                      aria-hidden="true"
+                    />
+                    <span>{translateConnectionStatus(device.connectionStatus)}</span>
+                    <span>· {formatRelativeTime(device.lastSeenAt)}</span>
+                  </div>
                 </div>
               </div>
               <span className={`status-pill ${device.connectionStatus}`}>
-                {device.connectionStatus}
+                {translateConnectionStatus(device.connectionStatus)}
               </span>
             </div>
 
             <dl className="device-meta-grid">
               <div>
-                <dt>Command</dt>
+                <dt>Trạng thái</dt>
+                <dd>{translateConnectionStatus(device.connectionStatus)}</dd>
+              </div>
+              <div>
+                <dt>Hoạt động gần nhất</dt>
+                <dd>{formatRelativeTime(device.lastSeenAt)}</dd>
+              </div>
+              <div>
+                <dt>Lệnh</dt>
                 <dd>{device.lastCommandStatus}</dd>
               </div>
               <div>
-                <dt>Last seen</dt>
-                <dd>{formatDateTime(device.lastSeenAt)}</dd>
+                <dt>Lần cuối thấy</dt>
+                <dd>{device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleString() : '-'}</dd>
               </div>
             </dl>
 
             <div className="device-controls">
               <div className="device-control-line">
                 <div>
-                  <strong>Auto mode</strong>
-                  <span>{pendingModeId === device.id ? 'Updating' : device.autoMode ? 'On' : 'Off'}</span>
+                  <strong>Chế độ tự động</strong>
+                  <span>
+                    {pendingModeId === device.id
+                      ? 'Đang cập nhật'
+                      : translatePowerState(device.autoMode)}
+                  </span>
                 </div>
                 <Toggle
                   checked={device.autoMode}
@@ -176,11 +191,14 @@ export function DevicesPage() {
                   }}
                 />
               </div>
-
               <div className="device-control-line">
                 <div>
-                  <strong>Power</strong>
-                  <span>{pendingPowerId === device.id ? 'Sending' : device.power ? 'On' : 'Off'}</span>
+                  <strong>Nguồn</strong>
+                  <span>
+                    {pendingPowerId === device.id
+                      ? 'Đang gửi'
+                      : translatePowerState(device.power)}
+                  </span>
                 </div>
                 <Toggle
                   checked={device.power}

@@ -31,7 +31,7 @@ export default function RegisterScreen() {
     if (emailError) return emailError;
     const passwordError = validatePasswordInput(password);
     if (passwordError) return passwordError;
-    if (confirmPassword !== password) return 'Passwords do not match.';
+    if (confirmPassword !== password) return 'Mật khẩu xác nhận không khớp.';
     return null;
   };
 
@@ -47,7 +47,7 @@ export default function RegisterScreen() {
       await register(email, password);
       router.replace('/home');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Register failed');
+      setError(e instanceof Error ? e.message : 'Đăng ký thất bại');
     } finally {
       setSubmitting(false);
     }
@@ -64,7 +64,7 @@ export default function RegisterScreen() {
             onPress={() => router.back()}
             hitSlop={10}
             style={styles.backButton}
-            accessibilityLabel="Back"
+            accessibilityLabel="Quay lại"
           >
             <Ionicons name="arrow-back" size={20} color="#11261f" />
           </Pressable>
@@ -76,8 +76,8 @@ export default function RegisterScreen() {
               resizeMode="contain"
             />
           </View>
-          <Text style={styles.brand}>Create account</Text>
-          <Text style={styles.subtitle}>Register to access your Smart Farm dashboard.</Text>
+          <Text style={styles.brand}>Tạo tài khoản</Text>
+          <Text style={styles.subtitle}>Đăng ký để truy cập bảng điều khiển Smart Farm.</Text>
         </View>
 
         <View style={styles.card}>
@@ -103,7 +103,7 @@ export default function RegisterScreen() {
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Password</Text>
+            <Text style={styles.label}>Mật khẩu</Text>
             <View
               style={[
                 styles.inputWrapper,
@@ -124,7 +124,7 @@ export default function RegisterScreen() {
               <Pressable
                 onPress={() => setShowPassword((s) => !s)}
                 hitSlop={10}
-                accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                accessibilityLabel={showPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
               >
                 <Ionicons
                   name={showPassword ? 'eye-off-outline' : 'eye-outline'}
@@ -136,7 +136,7 @@ export default function RegisterScreen() {
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Confirm password</Text>
+            <Text style={styles.label}>Xác nhận mật khẩu</Text>
             <View
               style={[
                 styles.inputWrapper,
@@ -145,7 +145,7 @@ export default function RegisterScreen() {
             >
               <Ionicons name="lock-closed-outline" size={18} color="#668085" />
               <TextInput
-                placeholder="Repeat your password"
+                placeholder="Nhập lại mật khẩu"
                 placeholderTextColor="#93a8ab"
                 secureTextEntry={!showPassword}
                 value={confirmPassword}
@@ -165,20 +165,20 @@ export default function RegisterScreen() {
             {submitting ? (
               <ActivityIndicator color="#093814" />
             ) : (
-              <Text style={styles.primaryButtonText}>Register</Text>
+              <Text style={styles.primaryButtonText}>Đăng ký</Text>
             )}
           </Pressable>
 
           {error ? <Text style={styles.formError}>{error}</Text> : null}
 
           <View style={styles.footerRow}>
-            <Text style={styles.footerText}>Already have an account?</Text>
+            <Text style={styles.footerText}>Đã có tài khoản?</Text>
             <Pressable
               onPress={() => router.replace('/')}
               hitSlop={10}
-              accessibilityLabel="Go to login"
+              accessibilityLabel="Đi tới đăng nhập"
             >
-              <Text style={styles.footerLink}> Sign in</Text>
+              <Text style={styles.footerLink}> Đăng nhập</Text>
             </Pressable>
           </View>
         </View>

@@ -1,5 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { ScheduleModule } from '@nestjs/schedule';
 import { UsersModule } from '../users/users.module';
 import { CommandModule } from '../command/command.module';
 import { AutomationService } from './automation.service';
@@ -19,6 +20,7 @@ import { User, UserSchema } from '../users/entity/user.schema';
       { name: AutomationRuleEntity.name, schema: AutomationRuleSchema },
       { name: AutomationLog.name, schema: AutomationLogSchema },
     ]),
+    ScheduleModule.forRoot(),
     forwardRef(() => UsersModule),
     forwardRef(() => CommandModule),
   ],

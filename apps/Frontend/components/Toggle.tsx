@@ -126,7 +126,7 @@ export function Toggle({
           </View>
         </Pressable>
         {loading ? (
-          <ActivityIndicator size="small" color="#2f37ff" accessibilityLabel="Updating" />
+          <ActivityIndicator size="small" color="#2f37ff" accessibilityLabel="Đang cập nhật" />
         ) : null}
       </View>
     </View>

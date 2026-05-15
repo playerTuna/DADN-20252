@@ -21,6 +21,8 @@ export type AlertItem = {
   id: string;
   text: string;
   time: string;
+  level?: 'low' | 'high';
+  sensorLabel?: string;
 };
 
 export type DashboardData = {

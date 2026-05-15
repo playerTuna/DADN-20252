@@ -19,15 +19,14 @@ export class AutomationLog {
   target!: string;
 
   @Prop({
-    required: true,
     type: String,
-    enum: ["soilMoisture", "temperature", "light"],
+    enum: ['soilMoisture', 'temperature', 'light'],
     index: true,
   })
-  sensorKey!: "soilMoisture" | "temperature" | "light";
+  sensorKey?: 'soilMoisture' | 'temperature' | 'light';
 
-  @Prop({ required: true })
-  sensorValue!: number;
+  @Prop()
+  sensorValue?: number;
 
   @Prop({ required: true, type: String, enum: ["ON", "OFF"] })
   action!: "ON" | "OFF";

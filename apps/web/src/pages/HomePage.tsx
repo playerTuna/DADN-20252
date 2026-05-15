@@ -1,18 +1,31 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { StatusMessage } from '../components/StatusMessage';
 import { Toggle } from '../components/Toggle';
+import { useTelemetryRealtime } from '../hooks/useTelemetryRealtime';
 import {
   getAlertsLive,
   getDashboard,
   getManagedDevices,
   getQuickStatsLive,
   getUser,
+  mergeStatItemsFromTelemetry,
   toggleManagedDeviceAutoMode,
   updateManagedDevicePower,
   type ManagedDevice,
+  type TelemetryRealtimeEvent,
   type UserProfile,
 } from '../services/api';
 import type { AlertItem, DashboardData, NavKey, StatItem } from '../types/dashboard';
+import { setHomeAlertCount } from '../utils/homeAlertBadge';
+import {
+  formatAlertLevelLabel,
+  formatStatDisplayValue,
+  isStatValueEmpty,
+  resolveAlertSeverity,
+  translateDeviceMode,
+  translateStatLabel,
+  translateConnectionStatus,
+} from '../utils/presentation';
 
 type ControlItem = {
   id: string;
@@ -43,6 +56,12 @@ function sensorInitial(label: string) {
   return label.charAt(0).toUpperCase();
 }
 
+function alertIcon(severity: ReturnType<typeof resolveAlertSeverity>) {
+  if (severity === 'high') return '⚠';
+  if (severity === 'low') return '↓';
+  return '✓';
+}
+
 export function HomePage() {
   const [dashboard, setDashboard] = useState<Record<NavKey, DashboardData> | null>(null);
   const [stats, setStats] = useState<StatItem[]>([]);
@@ -54,6 +73,12 @@ export function HomePage() {
   const [pendingPowerId, setPendingPowerId] = useState<string | null>(null);
   const [pendingModeId, setPendingModeId] = useState<string | null>(null);
 
+  const refreshAlerts = useCallback(async () => {
+    const nextAlerts = await getAlertsLive(12);
+    setAlerts(nextAlerts);
+    setHomeAlertCount(nextAlerts.length);
+  }, []);
+
   const refreshLiveData = useCallback(async () => {
     const [nextStats, nextAlerts, nextDevices] = await Promise.all([
       getQuickStatsLive(),
@@ -63,7 +88,32 @@ export function HomePage() {
     setStats(nextStats);
     setAlerts(nextAlerts);
     setDevices(nextDevices);
+    setHomeAlertCount(nextAlerts.length);
   }, []);
+
+  const alertRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  const scheduleAlertsRefresh = useCallback(() => {
+    if (alertRefreshTimerRef.current) {
+      clearTimeout(alertRefreshTimerRef.current);
+    }
+    alertRefreshTimerRef.current = setTimeout(() => {
+      void refreshAlerts().catch(() => undefined);
+    }, 800);
+  }, [refreshAlerts]);
+
+  const handleTelemetryEvent = useCallback(
+    (event: TelemetryRealtimeEvent) => {
+      setStats((current) => mergeStatItemsFromTelemetry(current, event));
+
+      if (event.thresholdLevel === 'low' || event.thresholdLevel === 'high') {
+        scheduleAlertsRefresh();
+      }
+    },
+    [scheduleAlertsRefresh]
+  );
+
+  useTelemetryRealtime(!loading && dashboard !== null, handleTelemetryEvent);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,14 +129,18 @@ export function HomePage() {
         if (!cancelled) setError(null);
       } catch (err) {
         console.log('Home load failed', err);
-        if (!cancelled) setError('Some dashboard data is unavailable.');
+        if (!cancelled) setError('Một số dữ liệu bảng điều khiển không khả dụng.');
       } finally {
         if (!cancelled) setLoading(false);
       }
 
       if (!cancelled) {
         timer = setInterval(() => {
-          void refreshLiveData().catch(() => undefined);
+          void getManagedDevices()
+            .then((nextDevices) => {
+              if (!cancelled) setDevices(nextDevices);
+            })
+            .catch(() => undefined);
         }, 10000);
       }
     })();
@@ -94,6 +148,9 @@ export function HomePage() {
     return () => {
       cancelled = true;
       if (timer) clearInterval(timer);
+      if (alertRefreshTimerRef.current) {
+        clearTimeout(alertRefreshTimerRef.current);
+      }
     };
   }, [refreshLiveData]);
 
@@ -111,7 +168,7 @@ export function HomePage() {
     } catch (err) {
       console.log('Power command failed', err);
       setDevices(snapshot);
-      setError('Unable to send device command.');
+      setError('Không thể gửi lệnh thiết bị.');
     } finally {
       setPendingPowerId(null);
     }
@@ -132,7 +189,7 @@ export function HomePage() {
     } catch (err) {
       console.log('Mode command failed', err);
       setDevices(snapshot);
-      setError('Unable to update automation mode.');
+      setError('Không thể cập nhật chế độ tự động.');
     } finally {
       setPendingModeId(null);
     }
@@ -146,41 +203,51 @@ export function HomePage() {
     <div className="page-stack">
       <header className="page-header hero-card">
         <div>
-          <p className="eyebrow">Dashboard</p>
-          <h1>Home</h1>
-          <p>Hi {user?.displayName || 'there'}, your farm overview is ready.</p>
+          <p className="eyebrow">Bảng điều khiển</p>
+          <h1>Trang chủ</h1>
+          <p>Xin chào {user?.displayName || 'bạn'}, tổng quan nông trại đã sẵn sàng.</p>
         </div>
         {loading ? <span className="spinner" /> : null}
       </header>
 
       {error ? <StatusMessage>{error}</StatusMessage> : null}
 
-      <section className="stat-grid" aria-label="Quick stats">
-        {visibleStats.map((item) => (
-          <article key={item.label} className="stat-card">
-            <span className="stat-icon">{sensorInitial(item.label)}</span>
-            <span>{item.label}</span>
-            <strong>{item.value}</strong>
-          </article>
-        ))}
+      <section className="stat-grid" aria-label="Thống kê nhanh">
+        {visibleStats.map((item) => {
+          const empty = isStatValueEmpty(item.value);
+          return (
+            <article key={item.label} className="stat-card">
+              <span className="stat-icon">{sensorInitial(item.label)}</span>
+              <span>{translateStatLabel(item.label)}</span>
+              {empty ? (
+                <div className="stat-empty">
+                  <p>Chưa có dữ liệu</p>
+                  <small>Đang chờ cảm biến gửi số liệu</small>
+                </div>
+              ) : (
+                <strong>{formatStatDisplayValue(item.label, item.value)}</strong>
+              )}
+            </article>
+          );
+        })}
       </section>
 
       <section className="content-grid">
         <div className="panel">
           <div className="section-heading">
-            <h2>Quick controls</h2>
-            <span>{controlItems.length} devices</span>
+            <h2>Điều khiển nhanh</h2>
+            <span>{controlItems.length} thiết bị</span>
           </div>
 
           <div className="control-list">
-            {controlItems.length === 0 ? <p className="empty-text">No managed devices.</p> : null}
+            {controlItems.length === 0 ? <p className="empty-text">Không có thiết bị được quản lý.</p> : null}
             {controlItems.map((item) => (
               <article key={item.id} className="control-card">
                 <div className="device-summary">
                   <span className="device-icon">{item.type.charAt(0).toUpperCase()}</span>
                   <div>
                     <h3>{item.name}</h3>
-                    <p>{item.state}</p>
+                    <p>{translateConnectionStatus(item.state)}</p>
                   </div>
                 </div>
 
@@ -191,7 +258,7 @@ export function HomePage() {
                     disabled={pendingModeId === item.id}
                     onClick={() => void handleMode(item.id)}
                   >
-                    {pendingModeId === item.id ? 'Updating' : item.mode}
+                    {pendingModeId === item.id ? 'Đang cập nhật' : translateDeviceMode(item.mode)}
                   </button>
                   <Toggle
                     checked={item.enabled}
@@ -208,18 +275,30 @@ export function HomePage() {
 
         <div className="panel">
           <div className="section-heading">
-            <h2>Alerts</h2>
-            <span>Latest</span>
+            <h2>Cảnh báo</h2>
+            <span>Mới nhất</span>
           </div>
 
           <div className="alert-list">
-            {visibleAlerts.length === 0 ? <p className="empty-text">No alerts yet.</p> : null}
-            {visibleAlerts.map((item) => (
-              <article key={item.id} className="alert-item">
-                <span>{item.text}</span>
-                <time>{item.time}</time>
-              </article>
-            ))}
+            {visibleAlerts.length === 0 ? <p className="empty-text">Chưa có cảnh báo.</p> : null}
+            {visibleAlerts.map((item) => {
+              const severity = resolveAlertSeverity(item.level);
+              const label = item.sensorLabel ?? item.text.split(' ')[0] ?? 'Cảm biến';
+              return (
+                <article key={item.id} className={`alert-item alert-item--${severity}`}>
+                  <div className="alert-item-main">
+                    <span className="alert-icon" aria-hidden="true">
+                      {alertIcon(severity)}
+                    </span>
+                    <div className="alert-copy">
+                      <span className="alert-sensor">{label}</span>
+                      <span className="alert-badge">{formatAlertLevelLabel(item.level)}</span>
+                    </div>
+                  </div>
+                  <time>{item.time}</time>
+                </article>
+              );
+            })}
           </div>
         </div>
       </section>

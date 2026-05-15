@@ -1,10 +1,13 @@
 import type { AlertItem, DashboardData, NavKey, StatItem } from '../types/dashboard';
 import { apiFetch } from './auth';
 import { buildManagedDevicePowerRequest, type DevicePowerValue } from './deviceRegistry';
+import { isSensorTelemetryType, type TelemetryRealtimeEvent } from './realtime';
 import { getApiBaseUrl } from './runtimeConfig';
 
+export type { TelemetryRealtimeEvent } from './realtime';
+
 type DeviceSettings = Record<string, boolean>;
-type TelemetryType = 'temp' | 'air_humidity' | 'soil_humidity' | 'light';
+export type TelemetryType = 'temp' | 'air_humidity' | 'soil_humidity' | 'light';
 
 export type UserProfile = {
   displayName: string;
@@ -31,10 +34,10 @@ type AlertDto = {
 };
 
 const QUICK_STAT_SENSOR_LABEL: Record<TelemetryType, string> = {
-  temp: 'Temperature',
-  air_humidity: 'Air Humidity',
-  soil_humidity: 'Soil Humidity',
-  light: 'Light Intensity',
+  temp: 'Nhiệt độ',
+  air_humidity: 'Độ ẩm không khí',
+  soil_humidity: 'Độ ẩm đất',
+  light: 'Cường độ ánh sáng',
 };
 
 const QUICK_STAT_ICON: Record<TelemetryType, StatItem['icon']> = {
@@ -48,6 +51,22 @@ export type TelemetryPoint = {
   id: string;
   numericValue: number;
   receivedAt: string;
+};
+
+export type WeeklyReportSensorKey = 'temp' | 'air_humidity' | 'soil_humidity' | 'light';
+
+export type WeeklySensorStat = {
+  avg: number | null;
+  min: number | null;
+  max: number | null;
+  deltaAvg: number | null;
+};
+
+export type WeeklyReportPayload = {
+  period: { from: string; to: string };
+  sensors: Record<WeeklyReportSensorKey, WeeklySensorStat>;
+  deviceActivity: { pump: number; fan: number; speaker: number };
+  alerts: Record<WeeklyReportSensorKey, number>;
 };
 
 export type ManagedDevice = {
@@ -66,18 +85,25 @@ export type ManagedDevice = {
 
 export type AutomationSensorKey = 'soilMoisture' | 'temperature' | 'light';
 
-export type AutomationThreshold = {
+export type AutomationCondition = {
+  sensorKey: AutomationSensorKey;
   operator: '<' | '>';
   value: number;
+};
+
+export type AutomationSchedule = {
+  time: string; // HH:mm
+  action: 'ON' | 'OFF';
+  enabled: boolean;
 };
 
 export type AutomationRule = {
   deviceId: string;
   target: 'pump' | 'fan' | 'rgb';
-  sensorKey: AutomationSensorKey;
   enabled: boolean;
-  turnOnWhen: AutomationThreshold;
-  turnOffWhen: AutomationThreshold;
+  turnOnConditions: AutomationCondition[];
+  turnOffConditions: AutomationCondition[];
+  schedules: AutomationSchedule[];
   onPayload?: string;
   offPayload?: string;
 };
@@ -186,6 +212,38 @@ function formatQuickStatValue(type: TelemetryType, doc: LatestTelemetry | null):
   return `${n}%`;
 }
 
+export function mergeStatItemsFromTelemetry(
+  stats: StatItem[],
+  event: TelemetryRealtimeEvent
+): StatItem[] {
+  if (!isSensorTelemetryType(event.type)) {
+    return stats;
+  }
+
+  const label = QUICK_STAT_SENSOR_LABEL[event.type];
+  const value = formatQuickStatValue(event.type, {
+    _id: '',
+    type: event.type,
+    numericValue: event.numericValue,
+    raw: event.raw,
+    receivedAt: event.receivedAt,
+  });
+
+  const hasLabel = stats.some((item) => item.label === label);
+  if (!hasLabel) {
+    return [
+      ...stats,
+      {
+        label,
+        value,
+        icon: QUICK_STAT_ICON[event.type],
+      },
+    ];
+  }
+
+  return stats.map((item) => (item.label === label ? { ...item, value } : item));
+}
+
 export async function getDashboard(): Promise<Record<NavKey, DashboardData>> {
   return apiGet<Record<NavKey, DashboardData>>('/dashboard');
 }
@@ -236,6 +294,10 @@ export async function updateAutomationRule(
   return apiPatch<AutomationRule[]>(`/automation/rules/${deviceId}`, payload);
 }
 
+export async function getWeeklyReport(from?: string): Promise<WeeklyReportPayload> {
+  return apiGet<WeeklyReportPayload>('/analytics/weekly-report', from ? { from } : undefined);
+}
+
 export async function getTelemetryHistory(
   type?: TelemetryType,
   from?: string,
@@ -279,5 +341,7 @@ export async function getAlertsLive(limit = 40): Promise<AlertItem[]> {
     id: row._id,
     text: alertText(row.type, row.level, row.value),
     time: formatTimeLabel(row.triggeredAt),
+    level: row.level,
+    sensorLabel: QUICK_STAT_SENSOR_LABEL[row.type],
   }));
 }

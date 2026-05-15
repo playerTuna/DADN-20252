@@ -45,15 +45,29 @@ type ChartPoint = {
 };
 
 const TAB_LABELS: Record<AnalyticsTab, string> = {
-  temp: 'Temperature',
-  air_humidity: 'Air Humidity',
-  soil_humidity: 'Soil Humidity',
-  light: 'Light Intensity',
+  temp: 'Nhiệt độ',
+  air_humidity: 'Độ ẩm không khí',
+  soil_humidity: 'Độ ẩm đất',
+  light: 'Cường độ ánh sáng',
 };
+
+const TAB_UNITS: Record<AnalyticsTab, string> = {
+  temp: '°C',
+  air_humidity: '%',
+  soil_humidity: '%',
+  light: 'lx',
+};
+
+function formatStatWithUnit(tab: AnalyticsTab, value?: number) {
+  if (value === undefined || Number.isNaN(value)) return '—';
+  const formatted = formatTick(value);
+  const unit = TAB_UNITS[tab];
+  return unit === '°C' ? `${formatted}°C` : `${formatted} ${unit}`;
+}
 
 function displayAnalyticsTitle(title?: string) {
   if (!title || title === 'Analytics - Dashboards') {
-    return 'Environment Analytics';
+    return 'Phân tích môi trường';
   }
   return title;
 }
@@ -88,8 +102,8 @@ export default function AnalyticsScreen() {
   const { width } = useWindowDimensions();
   const isDesktop = width >= 960;
 
-  const [pageTitle, setPageTitle] = useState('Environment Analytics');
-  const [userName, setUserName] = useState('User');
+  const [pageTitle, setPageTitle] = useState('Phân tích môi trường');
+  const [userName, setUserName] = useState('Người dùng');
   const [userEmail, setUserEmail] = useState<string | undefined>();
   const [activeTab, setActiveTab] = useState<AnalyticsTab>('temp');
   const [series, setSeries] = useState<TelemetryPoint[]>([]);
@@ -128,13 +142,13 @@ export default function AnalyticsScreen() {
 
         setPageTitle(displayAnalyticsTitle(dashboard.analytics?.title));
         setStats(dashboard.analytics?.stats || []);
-        setUserName(profile.displayName || 'User');
+        setUserName(profile.displayName || 'Người dùng');
         setUserEmail(profile.email);
         setErrorMessage(null);
       } catch (error) {
         console.log('Analytics bootstrap failed', error);
         if (!cancelled) {
-          setErrorMessage('Unable to load analytics dashboard.');
+          setErrorMessage('Không thể tải bảng phân tích.');
         }
       } finally {
         if (!cancelled) {
@@ -161,7 +175,7 @@ export default function AnalyticsScreen() {
       } catch (error) {
         console.log('Telemetry history load failed', error);
         if (!cancelled) {
-          setErrorMessage('Unable to load telemetry history.');
+          setErrorMessage('Không thể tải lịch sử telemetry.');
         }
       } finally {
         if (!cancelled) {
@@ -255,26 +269,23 @@ export default function AnalyticsScreen() {
   const summaryItems = useMemo(() => {
     if (!series.length) {
       return [
-        { label: 'Latest', value: '-' },
-        { label: 'Min', value: '-' },
-        { label: 'Max', value: '-' },
-        { label: 'Average', value: '-' },
+        { label: 'TB', value: '—' },
+        { label: 'Thấp nhất', value: '—' },
+        { label: 'Cao nhất', value: '—' },
       ];
     }
 
     const values = series.map((item) => item.numericValue);
-    const latest = series[0].numericValue;
     const min = Math.min(...values);
     const max = Math.max(...values);
     const average = values.reduce((total, value) => total + value, 0) / values.length;
 
     return [
-      { label: 'Latest', value: String(latest) },
-      { label: 'Min', value: String(min) },
-      { label: 'Max', value: String(max) },
-      { label: 'Average', value: average.toFixed(1) },
+      { label: 'TB', value: formatStatWithUnit(activeTab, average) },
+      { label: 'Thấp nhất', value: formatStatWithUnit(activeTab, min) },
+      { label: 'Cao nhất', value: formatStatWithUnit(activeTab, max) },
     ];
-  }, [series]);
+  }, [series, activeTab]);
 
   const recentRows = useMemo(() => series.slice(0, 5), [series]);
 
@@ -326,16 +337,23 @@ export default function AnalyticsScreen() {
 
         <View style={styles.mainArea}>
           <View style={[styles.topBar, !isDesktop && styles.mobileTopBar]}>
-            <View style={!isDesktop ? styles.mobileTitleWrap : undefined}>
-              <Text style={[styles.pageTitle, !isDesktop && styles.mobilePageTitle]}>
-                {isDesktop ? pageTitle : 'Analytics'}
-              </Text>
-              {!isDesktop ? (
-                <Text style={styles.headerSubText}>{TAB_LABELS[activeTab]}</Text>
-              ) : null}
+            <View style={styles.topBarMain}>
+              <View style={!isDesktop ? styles.mobileTitleWrap : undefined}>
+                <Text style={[styles.pageTitle, !isDesktop && styles.mobilePageTitle]}>
+                  {isDesktop ? pageTitle : 'Phân tích'}
+                </Text>
+                {!isDesktop ? (
+                  <Text style={styles.headerSubText}>{TAB_LABELS[activeTab]}</Text>
+                ) : null}
+              </View>
             </View>
 
             <View style={styles.topBarRight}>
+              {isDesktop ? (
+                <Pressable onPress={() => router.push('/weekly-report')} style={styles.weekReportBtn}>
+                  <Text style={styles.weekReportBtnText}>Báo cáo tuần</Text>
+                </Pressable>
+              ) : null}
               <MobileHeaderMenu
                 userName={userName}
                 userEmail={userEmail}
@@ -354,20 +372,9 @@ export default function AnalyticsScreen() {
             {loading ? <ActivityIndicator size="large" color={ACCENT} /> : null}
             {errorMessage ? <Text style={styles.errorBanner}>{errorMessage}</Text> : null}
 
-            {!isDesktop ? (
-              <View style={styles.mobileSummaryGrid}>
-                {summaryItems.map((item) => (
-                  <View key={item.label} style={styles.mobileSummaryCard}>
-                    <Text style={styles.summaryLabel}>{item.label}</Text>
-                    <Text style={styles.summaryValue}>{item.value}</Text>
-                  </View>
-                ))}
-              </View>
-            ) : null}
-
             <View
               style={[styles.panel, !isDesktop && styles.panelCompact]}
-              accessibilityLabel={`Telemetry chart with ${stats.length} dashboard stats loaded`}
+              accessibilityLabel={`Biểu đồ telemetry với ${stats.length} chỉ số đã tải`}
             >
               <ScrollView
                 horizontal={!isDesktop}
@@ -393,6 +400,30 @@ export default function AnalyticsScreen() {
                   );
                 })}
               </ScrollView>
+
+              {!isDesktop ? (
+                <>
+                  <Pressable
+                    onPress={() => router.push('/weekly-report')}
+                    style={styles.weeklyReportBanner}
+                  >
+                    <Text style={styles.weeklyReportBannerText}>📋 Xem báo cáo tuần này</Text>
+                    <Text style={styles.weeklyReportBannerArrow}>→</Text>
+                  </Pressable>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.mobileMiniStatsRow}
+                  >
+                    {summaryItems.map((item) => (
+                      <View key={item.label} style={styles.mobileMiniStatCard}>
+                        <Text style={styles.summaryLabel}>{item.label}</Text>
+                        <Text style={styles.summaryValue}>{item.value}</Text>
+                      </View>
+                    ))}
+                  </ScrollView>
+                </>
+              ) : null}
 
               <View style={[styles.chartArea, !isDesktop && styles.mobileChartArea]}>
                 <View style={[styles.yAxis, !isDesktop && styles.mobileYAxis]}>
@@ -487,7 +518,7 @@ export default function AnalyticsScreen() {
 
                     {!chartLoading && chartRows.length === 0 ? (
                       <View style={styles.chartOverlay}>
-                        <Text style={styles.emptyText}>No telemetry history available.</Text>
+                        <Text style={styles.emptyText}>Chưa có lịch sử telemetry.</Text>
                       </View>
                     ) : null}
                   </View>
@@ -513,9 +544,9 @@ export default function AnalyticsScreen() {
 
             {!isDesktop ? (
               <View style={styles.recentPanel}>
-                <Text style={styles.sectionTitle}>Recent readings</Text>
+                <Text style={styles.sectionTitle}>Số liệu gần đây</Text>
                 {recentRows.length === 0 ? (
-                  <Text style={styles.emptyText}>No telemetry history available.</Text>
+                  <Text style={styles.emptyText}>Chưa có lịch sử telemetry.</Text>
                 ) : (
                   recentRows.map((item) => (
                     <View key={item.id} style={styles.readingRow}>
@@ -611,6 +642,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  topBarMain: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   mobileTopBar: {
     height: 'auto',
     minHeight: 84,
@@ -634,6 +671,17 @@ const styles = StyleSheet.create({
   headerSubText: {
     fontSize: 14,
     color: TEXT_SECONDARY,
+  },
+  weekReportBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: ACCENT,
+  },
+  weekReportBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 13,
   },
   timeWrap: {
     alignItems: 'flex-end',
@@ -703,24 +751,46 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
-  mobileSummaryGrid: {
+  weeklyReportBanner: {
+    marginTop: 8,
+    marginBottom: 8,
+    minHeight: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#c7d2fe',
+    backgroundColor: '#eef2ff',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 12,
+    gap: 8,
   },
-  mobileSummaryCard: {
-    width: '48%',
-    minHeight: 94,
-    borderRadius: 18,
-    backgroundColor: PANEL_BG,
-    padding: 14,
+  weeklyReportBannerText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#312e81',
+  },
+  weeklyReportBannerArrow: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#312e81',
+  },
+  mobileMiniStatsRow: {
+    gap: 10,
+    paddingBottom: 12,
+  },
+  mobileMiniStatCard: {
+    minWidth: 108,
+    minHeight: 72,
+    borderRadius: 14,
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     justifyContent: 'space-between',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    elevation: 1,
   },
   summaryLabel: {
     fontSize: 13,
@@ -924,8 +994,8 @@ const styles = StyleSheet.create({
     color: TEXT_SECONDARY,
   },
   topBarRight: {
-    paddingTop: 12,
-    justifyContent: 'center',
-    alignItems: 'flex-end',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
 });

@@ -3,7 +3,7 @@ import { BottomNav } from '../components/BottomNav';
 import { Feather, FontAwesome6, Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -17,18 +17,33 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Toggle } from '../components/Toggle';
 import { UserMenu } from '../components/UserMenu';
 import { sidebarItems } from '../constants/navigation';
+import { useTelemetryRealtime } from '../hooks/useTelemetryRealtime';
 import {
   getAlertsLive,
   getDashboard,
   getManagedDevices,
   getQuickStatsLive,
   getUser,
+  mergeStatItemsFromTelemetry,
   toggleManagedDeviceAutoMode,
   updateManagedDevicePower,
   type ManagedDevice,
+  type TelemetryRealtimeEvent,
 } from '../services/api';
 import { clearTokens, getTokens } from '../services/auth';
-import type { DashboardData, NavKey } from '../types/dashboard';
+import type { AlertItem, DashboardData, DashboardNavKey, NavKey } from '../types/dashboard';
+import { setHomeAlertCount } from '../utils/homeAlertBadge';
+import {
+  ALERT_SEVERITY_COLORS,
+  formatAlertLevelLabel,
+  formatStatPlaceholder,
+  formatStatValueParts,
+  isStatValueEmpty,
+  resolveAlertSeverity,
+  translateDeviceMode,
+  translateStatLabel,
+  translateConnectionStatus,
+} from '../utils/presentation';
 
 const PAGE_BG = '#e5e5e5';
 const PANEL_BG = '#ffffff';
@@ -97,9 +112,15 @@ function mapDevicesToControls(devices: ManagedDevice[]): HomeControlItem[] {
   }));
 }
 
+function alertIcon(severity: ReturnType<typeof resolveAlertSeverity>) {
+  if (severity === 'high') return '⚠';
+  if (severity === 'low') return '↓';
+  return '✓';
+}
+
 function displayHomeTitle(title?: string) {
   if (!title || title === 'Home - Dashboards') {
-    return 'Home';
+    return 'Trang chủ';
   }
   return title;
 }
@@ -115,9 +136,9 @@ export default function HomeScreen() {
     ? 172
     : (`${100 / statsPerRow - (statsPerRow > 1 ? 2 : 0)}%` as const);
 
-  const [dashboard, setDashboard] = useState<Record<NavKey, DashboardData> | null>(null);
+  const [dashboard, setDashboard] = useState<Record<DashboardNavKey, DashboardData> | null>(null);
   const [managedDevices, setManagedDevices] = useState<ManagedDevice[]>([]);
-  const [userName, setUserName] = useState('User');
+  const [userName, setUserName] = useState('Người dùng');
   const [userEmail, setUserEmail] = useState<string | undefined>();
   const [bootstrapPending, setBootstrapPending] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -148,8 +169,24 @@ export default function HomeScreen() {
     return () => clearInterval(timer);
   }, []);
 
+  const refreshAlerts = useCallback(async () => {
+    const alerts = await getAlertsLive(40);
+    setHomeAlertCount(alerts.length);
+    setDashboard((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        home: {
+          ...prev.home,
+          alerts,
+        },
+      };
+    });
+  }, []);
+
   const refreshLiveHome = useCallback(async () => {
     const [stats, alerts] = await Promise.all([getQuickStatsLive(), getAlertsLive(40)]);
+    setHomeAlertCount(alerts.length);
 
     setDashboard((prev) => {
       if (!prev) return prev;
@@ -163,6 +200,39 @@ export default function HomeScreen() {
       };
     });
   }, []);
+
+  const alertRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  const scheduleAlertsRefresh = useCallback(() => {
+    if (alertRefreshTimerRef.current) {
+      clearTimeout(alertRefreshTimerRef.current);
+    }
+    alertRefreshTimerRef.current = setTimeout(() => {
+      void refreshAlerts();
+    }, 800);
+  }, [refreshAlerts]);
+
+  const handleTelemetryEvent = useCallback(
+    (event: TelemetryRealtimeEvent) => {
+      setDashboard((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          home: {
+            ...prev.home,
+            stats: mergeStatItemsFromTelemetry(prev.home.stats, event),
+          },
+        };
+      });
+
+      if (event.thresholdLevel === 'low' || event.thresholdLevel === 'high') {
+        scheduleAlertsRefresh();
+      }
+    },
+    [scheduleAlertsRefresh]
+  );
+
+  useTelemetryRealtime(!bootstrapPending && dashboard !== null, handleTelemetryEvent);
 
   const refreshManagedDevices = useCallback(async () => {
     const devices = await getManagedDevices();
@@ -180,7 +250,7 @@ export default function HomeScreen() {
         if (cancelled) return;
 
         setDashboard(dash);
-        setUserName(profile.displayName || 'User');
+        setUserName(profile.displayName || 'Người dùng');
         setUserEmail(profile.email);
 
         await Promise.allSettled([refreshLiveHome(), refreshManagedDevices()]);
@@ -190,7 +260,7 @@ export default function HomeScreen() {
       } catch (error) {
         console.log('Initial home load failed', error);
         if (!cancelled) {
-          setErrorMessage('Some dashboard data is unavailable.');
+          setErrorMessage('Một số dữ liệu bảng điều khiển không khả dụng.');
         }
       } finally {
         if (!cancelled) {
@@ -200,7 +270,7 @@ export default function HomeScreen() {
 
       if (!cancelled) {
         pollTimer = setInterval(() => {
-          void Promise.allSettled([refreshLiveHome(), refreshManagedDevices()]);
+          void refreshManagedDevices();
         }, 10_000);
       }
     })();
@@ -208,6 +278,9 @@ export default function HomeScreen() {
     return () => {
       cancelled = true;
       if (pollTimer) clearInterval(pollTimer);
+      if (alertRefreshTimerRef.current) {
+        clearTimeout(alertRefreshTimerRef.current);
+      }
     };
   }, [refreshLiveHome, refreshManagedDevices]);
 
@@ -228,7 +301,7 @@ export default function HomeScreen() {
       } catch (error) {
         console.log('updateManagedDevicePower failed', error);
         setManagedDevices(snapshot);
-        setErrorMessage('Unable to send device command right now.');
+        setErrorMessage('Không thể gửi lệnh thiết bị ngay lúc này.');
       } finally {
         setPendingPowerId(null);
       }
@@ -254,7 +327,7 @@ export default function HomeScreen() {
       } catch (error) {
         console.log('toggleManagedDeviceAutoMode failed', error);
         setManagedDevices(snapshot);
-        setErrorMessage('Unable to update automation mode right now.');
+        setErrorMessage('Không thể cập nhật chế độ tự động ngay lúc này.');
       } finally {
         setPendingModeId(null);
       }
@@ -276,7 +349,7 @@ export default function HomeScreen() {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={[styles.page, styles.centered, { padding: 24 }]}>
-          <Text style={styles.errorBanner}>Unable to load dashboard.</Text>
+          <Text style={styles.errorBanner}>Không thể tải bảng điều khiển.</Text>
         </View>
       </SafeAreaView>
     );
@@ -305,10 +378,8 @@ export default function HomeScreen() {
   const controlPageItems = paginationItems(safeControlPage, totalControlPages);
 
   const handleNavPress = (key: NavKey) => {
-    if (key === 'analytics' || key === 'devices') {
-      router.push(`/${key}`);
-      return;
-    }
+    if (key === 'home') return;
+    router.push(`/${key}`);
   };
 
   const renderSidebar = () => (
@@ -357,7 +428,7 @@ export default function HomeScreen() {
               <Text style={[styles.pageTitle, !isDesktop && styles.mobilePageTitle]}>
                 {displayHomeTitle(activeData.title)}
               </Text>
-              {!isDesktop ? <Text style={styles.headerGreeting}>Hi, {userName}</Text> : null}
+              {!isDesktop ? <Text style={styles.headerGreeting}>Xin chào, {userName}</Text> : null}
               {bootstrapPending ? <ActivityIndicator size="small" color={ACCENT} /> : null}
             </View>
 
@@ -379,35 +450,66 @@ export default function HomeScreen() {
           >
             {errorMessage ? <Text style={styles.errorBanner}>{errorMessage}</Text> : null}
 
-            <Text style={styles.sectionTitle}>Quick Stats</Text>
+            <Text style={styles.sectionTitle}>Thống kê nhanh</Text>
             <View style={[styles.statsGrid, !isDesktop && styles.mobileStatsGrid]}>
-              {activeData.stats.map((item) => (
-                <View
-                  key={item.label}
-                  style={[
-                    styles.statCard,
-                    !isDesktop && styles.mobileStatCard,
-                    { width: statWidth },
-                  ]}
-                >
-                  <Text style={styles.statLabel}>{item.label}</Text>
-                  <Ionicons
-                    name={item.icon as never}
-                    size={isDesktop ? 46 : 32}
-                    color={TEXT_PRIMARY}
-                  />
-                  <Text style={styles.statValue}>{item.value}</Text>
-                </View>
-              ))}
+              {activeData.stats.map((item) => {
+                const empty = isStatValueEmpty(item.value);
+                const valueParts = empty ? null : formatStatValueParts(item.label, item.value);
+                return (
+                  <View
+                    key={item.label}
+                    style={[
+                      styles.statCard,
+                      !isDesktop && styles.mobileStatCard,
+                      { width: statWidth },
+                    ]}
+                  >
+                    <Text
+                      style={[styles.statLabel, !isDesktop && styles.mobileStatLabel]}
+                      numberOfLines={1}
+                    >
+                      {translateStatLabel(item.label)}
+                    </Text>
+                    <Ionicons
+                      name={item.icon as never}
+                      size={isDesktop ? 46 : 32}
+                      color={TEXT_PRIMARY}
+                    />
+                    <View style={[styles.statValueSlot, !isDesktop && styles.mobileStatValueSlot]}>
+                      {empty ? (
+                        <Text
+                          style={[
+                            styles.statPlaceholder,
+                            !isDesktop && styles.mobileStatPlaceholder,
+                          ]}
+                        >
+                          {formatStatPlaceholder(item.label)}
+                        </Text>
+                      ) : (
+                        <View style={styles.statValueRow}>
+                          <Text style={[styles.statValue, !isDesktop && styles.mobileStatValue]}>
+                            {valueParts?.main ?? item.value}
+                          </Text>
+                          {valueParts?.unit ? (
+                            <Text style={[styles.statValueUnit, !isDesktop && styles.mobileStatValueUnit]}>
+                              {valueParts.unit}
+                            </Text>
+                          ) : null}
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                );
+              })}
             </View>
 
             <View style={[styles.sectionRow, !isTablet && styles.sectionRowStack]}>
               <View style={[styles.leftColumn, !isTablet && styles.columnFull]}>
-                <Text style={styles.sectionTitle}>Quick Control</Text>
+                <Text style={styles.sectionTitle}>Điều khiển nhanh</Text>
 
                 <View style={[styles.panel, !isDesktop && styles.mobilePanel]}>
                   {pagedControls.length === 0 ? (
-                    <Text style={styles.emptyText}>No managed devices available.</Text>
+                    <Text style={styles.emptyText}>Không có thiết bị được quản lý.</Text>
                   ) : null}
 
                   {pagedControls.map((item, index) => (
@@ -426,7 +528,7 @@ export default function HomeScreen() {
 
                         <View style={styles.controlTextWrap}>
                           <Text style={styles.controlName}>{item.name}</Text>
-                          <Text style={styles.controlStateInline}>{item.state}</Text>
+                          <Text style={styles.controlStateInline}>{translateConnectionStatus(item.state)}</Text>
                         </View>
                       </View>
 
@@ -436,7 +538,7 @@ export default function HomeScreen() {
                         style={[styles.modeButton, !isDesktop && styles.mobileModeButton]}
                       >
                         <Text style={styles.controlMode}>
-                          {pendingModeId === item.id ? 'updating...' : item.mode}
+                          {pendingModeId === item.id ? 'Đang cập nhật...' : translateDeviceMode(item.mode)}
                         </Text>
                       </Pressable>
 
@@ -484,26 +586,46 @@ export default function HomeScreen() {
               </View>
 
               <View style={[styles.rightColumn, !isTablet && styles.columnFull]}>
-                <Text style={styles.sectionTitle}>Alert log</Text>
+                <Text style={styles.sectionTitle}>Nhật ký cảnh báo</Text>
 
                 <View style={[styles.panel, !isDesktop && styles.mobilePanel]}>
                   {pagedAlerts.length === 0 ? (
-                    <Text style={styles.emptyText}>No alerts yet.</Text>
+                    <Text style={styles.emptyText}>Chưa có cảnh báo.</Text>
                   ) : null}
 
-                  {pagedAlerts.map((item, index) => (
-                    <View
-                      key={item.id}
-                      style={[
-                        styles.alertRow,
-                        !isDesktop && styles.mobileAlertRow,
-                        isDesktop && index !== pagedAlerts.length - 1 && styles.rowDivider,
-                      ]}
-                    >
-                      <Text style={styles.alertText}>{item.text}</Text>
-                      <Text style={styles.alertTime}>{item.time}</Text>
-                    </View>
-                  ))}
+                  {pagedAlerts.map((item: AlertItem, index) => {
+                    const severity = resolveAlertSeverity(item.level);
+                    const colors = ALERT_SEVERITY_COLORS[severity];
+                    const label = item.sensorLabel ?? item.text.split(' ')[0] ?? 'Cảm biến';
+                    return (
+                      <View
+                        key={item.id}
+                        style={[
+                          styles.alertCard,
+                          isDesktop ? styles.desktopAlertCard : styles.mobileAlertCard,
+                          { backgroundColor: colors.bg, borderLeftColor: colors.accent },
+                          isDesktop && index !== pagedAlerts.length - 1 && styles.rowDivider,
+                        ]}
+                      >
+                        <View style={[styles.alertIconWrap, { backgroundColor: '#ffffff' }]}>
+                          <Text style={[styles.alertIcon, { color: colors.accent }]}>
+                            {alertIcon(severity)}
+                          </Text>
+                        </View>
+                        <View style={styles.alertBody}>
+                          <View style={styles.alertTitleRow}>
+                            <Text style={styles.alertSensor} numberOfLines={1}>
+                              {label}
+                            </Text>
+                            <Text style={styles.alertTime}>{item.time}</Text>
+                          </View>
+                          <View style={[styles.alertLevelBadge, { backgroundColor: colors.accent }]}>
+                            <Text style={styles.alertLevelText}>{formatAlertLevelLabel(item.level)}</Text>
+                          </View>
+                        </View>
+                      </View>
+                    );
+                  })}
 
                   {totalAlertPages > 1 ? (
                     <View style={styles.panelPagination}>
@@ -741,13 +863,15 @@ const styles = StyleSheet.create({
     width: 172,
     height: 150,
     minWidth: 172,
+    maxHeight: 150,
     borderRadius: 4,
     backgroundColor: PANEL_BG,
     borderWidth: 0,
     paddingHorizontal: 14,
     paddingVertical: 10,
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
+    overflow: 'hidden',
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.18,
@@ -756,25 +880,75 @@ const styles = StyleSheet.create({
   },
   mobileStatCard: {
     minWidth: 0,
-    height: 128,
+    width: undefined,
+    minHeight: 120,
+    height: 120,
+    maxHeight: 120,
     borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    alignItems: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    overflow: 'hidden',
     shadowOpacity: 0.08,
     shadowRadius: 8,
     elevation: 1,
+  },
+  statValueSlot: {
+    flex: 1,
+    width: '100%',
+    minHeight: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mobileStatValueSlot: {
+    minHeight: 44,
+  },
+  mobileStatLabel: {
+    textAlign: 'center',
+    fontSize: 11,
   },
   statLabel: {
     fontSize: 13,
     fontWeight: '700',
     color: TEXT_PRIMARY,
-    textAlign: 'left',
+    textAlign: 'center',
+    width: '100%',
+  },
+  statValueRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    gap: 2,
   },
   statValue: {
     fontSize: 24,
     fontWeight: '800',
     color: TEXT_PRIMARY,
+  },
+  mobileStatValue: {
+    fontSize: 26,
+    lineHeight: 28,
+  },
+  statValueUnit: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: TEXT_PRIMARY,
+    marginBottom: 2,
+  },
+  mobileStatValueUnit: {
+    fontSize: 14,
+    marginBottom: 3,
+  },
+  statPlaceholder: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#9ca3af',
+    textAlign: 'center',
+  },
+  mobileStatPlaceholder: {
+    fontSize: 17,
+    fontWeight: '700',
   },
   sectionRow: {
     flexDirection: 'row',
@@ -891,19 +1065,20 @@ const styles = StyleSheet.create({
     color: TEXT_PRIMARY,
     textTransform: 'capitalize',
   },
-  alertRow: {
-    minHeight: 31,
+  alertCard: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    alignItems: 'flex-start',
     gap: 12,
-    paddingHorizontal: 20,
-    paddingVertical: 5,
+    borderLeftWidth: 4,
   },
-  mobileAlertRow: {
+  desktopAlertCard: {
+    minHeight: 56,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  mobileAlertCard: {
     minHeight: 64,
     borderRadius: 16,
-    backgroundColor: PANEL_BG,
     paddingHorizontal: 14,
     paddingVertical: 12,
     marginBottom: 10,
@@ -913,13 +1088,50 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 1,
   },
-  alertText: {
+  alertIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    marginTop: 2,
+  },
+  alertIcon: {
+    fontSize: 16,
+    fontWeight: '800',
+    lineHeight: 18,
+  },
+  alertBody: {
     flex: 1,
+    minWidth: 0,
+    gap: 6,
+  },
+  alertTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  alertSensor: {
+    flex: 1,
+    minWidth: 0,
     fontSize: 14,
     fontWeight: '700',
     color: TEXT_PRIMARY,
   },
+  alertLevelBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  alertLevelText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#ffffff',
+  },
   alertTime: {
+    flexShrink: 0,
     fontSize: 12,
     color: TEXT_SECONDARY,
   },

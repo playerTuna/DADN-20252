@@ -39,7 +39,7 @@ export function MobileHeaderMenu({ userName, userEmail, onLogout }: Props) {
         onPress={() => setOpen(true)}
         style={styles.trigger}
         accessibilityRole="button"
-        accessibilityLabel="Open account menu"
+        accessibilityLabel="Mở menu tài khoản"
       >
         <View style={styles.avatar}>
           <Text style={styles.avatarText}>{initials}</Text>
@@ -55,24 +55,24 @@ export function MobileHeaderMenu({ userName, userEmail, onLogout }: Props) {
               </View>
 
               <View style={styles.headerTextWrap}>
-                <Text style={styles.nameText}>{userName || 'User'}</Text>
+                <Text style={styles.nameText}>{userName || 'Người dùng'}</Text>
                 {userEmail ? <Text style={styles.emailText}>{userEmail}</Text> : null}
               </View>
             </View>
 
             <Pressable style={styles.item} onPress={() => goTo('/profile')}>
               <Feather name="user" size={18} color="#111111" />
-              <Text style={styles.itemText}>Profile</Text>
+              <Text style={styles.itemText}>Hồ sơ</Text>
             </Pressable>
 
             <Pressable style={styles.item} onPress={() => goTo('/settings')}>
               <Feather name="settings" size={18} color="#111111" />
-              <Text style={styles.itemText}>Settings</Text>
+              <Text style={styles.itemText}>Cài đặt</Text>
             </Pressable>
 
             <Pressable style={styles.item} onPress={handleLogout}>
               <Feather name="log-out" size={18} color="#b91c1c" />
-              <Text style={styles.logoutText}>Log out</Text>
+              <Text style={styles.logoutText}>Đăng xuất</Text>
             </Pressable>
           </View>
         </Pressable>

@@ -26,30 +26,42 @@ export const defaultAutomationRules: AutomationRule[] = [
   {
     deviceId: "pump",
     target: "pump",
-    sensorKey: "soilMoisture",
     enabled: true,
-    turnOnWhen: { operator: "<", value: 40 },
-    turnOffWhen: { operator: ">", value: 70 },
+    turnOnConditions: [
+      { sensorKey: "soilMoisture", operator: "<", value: 40 },
+    ],
+    turnOffConditions: [
+      { sensorKey: "soilMoisture", operator: ">", value: 70 },
+    ],
+    schedules: [],
     onPayload: "ON",
     offPayload: "OFF",
   },
   {
     deviceId: "fan",
     target: "fan",
-    sensorKey: "temperature",
     enabled: true,
-    turnOnWhen: { operator: ">", value: 32 },
-    turnOffWhen: { operator: "<", value: 28 },
+    turnOnConditions: [
+      { sensorKey: "temperature", operator: ">", value: 32 },
+    ],
+    turnOffConditions: [
+      { sensorKey: "temperature", operator: "<", value: 28 },
+    ],
+    schedules: [],
     onPayload: "ON",
     offPayload: "OFF",
   },
   {
     deviceId: "rgb",
     target: "rgb",
-    sensorKey: "light",
     enabled: false,
-    turnOnWhen: { operator: "<", value: 35 },
-    turnOffWhen: { operator: ">", value: 65 },
+    turnOnConditions: [
+      { sensorKey: "light", operator: "<", value: 35 },
+    ],
+    turnOffConditions: [
+      { sensorKey: "light", operator: ">", value: 65 },
+    ],
+    schedules: [],
     onPayload: "255,255,255",
     offPayload: "0,0,0",
   },

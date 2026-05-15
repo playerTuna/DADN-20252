@@ -1,6 +1,7 @@
 import { Feather, Ionicons } from "@expo/vector-icons";
 
-export type NavKey = "home" | "analytics" | "devices";
+export type DashboardNavKey = "home" | "analytics" | "devices";
+export type NavKey = DashboardNavKey | "automation";
 export type DeviceType = "pump" | "light";
 export type ControlMode = "manually" | "auto";
 
@@ -23,6 +24,8 @@ export type AlertItem = {
   id: string;
   text: string;
   time: string;
+  level?: 'low' | 'high';
+  sensorLabel?: string;
 };
 
 export type DashboardData = {

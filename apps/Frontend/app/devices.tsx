@@ -29,6 +29,14 @@ import {
 import { clearTokens, getTokens } from '../services/auth';
 import type { NavKey } from '../types/dashboard';
 import { BottomNav } from '../components/BottomNav';
+
+function deviceStatusLabel(status: ManagedDevice['connectionStatus']) {
+  return status === 'online' ? 'Trực tuyến' : 'Ngoại tuyến';
+}
+
+function deviceIsOnline(status: ManagedDevice['connectionStatus']) {
+  return status === 'online';
+}
 const PAGE_BG = '#e5e5e5';
 const PANEL_BG = '#ffffff';
 const PANEL_BORDER = '#d2d2d2';
@@ -61,14 +69,14 @@ function paginationItems(current: number, total: number): (number | 'ellipsis')[
 
 function displayDevicesTitle(title?: string) {
   if (!title || title === 'Devices - Dashboards') {
-    return 'Control & manage devices';
+    return 'Quản lý thiết bị';
   }
   return title;
 }
 
 function displayMobileDevicesTitle(title: string) {
-  if (title === 'Control & manage devices') {
-    return 'Devices';
+  if (title === 'Quản lý thiết bị') {
+    return 'Thiết bị';
   }
   return title;
 }
@@ -86,18 +94,14 @@ function DeviceIcon({ id }: { id: string }) {
   return <Feather name="sun" size={22} color={TEXT_PRIMARY} />;
 }
 
-function statusPillStyle(status: ManagedDevice['connectionStatus']) {
-  return status === 'online' ? styles.statusOnline : styles.statusOffline;
-}
-
 export default function DevicesScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const isDesktop = width >= 960;
 
   const [devices, setDevices] = useState<ManagedDevice[]>([]);
-  const [pageTitle, setPageTitle] = useState('Control & manage devices');
-  const [userName, setUserName] = useState('User');
+  const [pageTitle, setPageTitle] = useState('Quản lý thiết bị');
+  const [userName, setUserName] = useState('Người dùng');
   const [userEmail, setUserEmail] = useState<string | undefined>();
   const [search, setSearch] = useState('');
   const [devicePage, setDevicePage] = useState(1);
@@ -141,13 +145,13 @@ export default function DevicesScreen() {
 
         setPageTitle(displayDevicesTitle(dashboard.devices?.title));
         setDevices(managedDevices);
-        setUserName(profile.displayName || 'User');
+        setUserName(profile.displayName || 'Người dùng');
         setUserEmail(profile.email);
         setErrorMessage(null);
       } catch (error) {
         console.log('Devices screen load failed', error);
         if (!cancelled) {
-          setErrorMessage('Unable to load device data.');
+          setErrorMessage('Không thể tải dữ liệu thiết bị.');
         }
       } finally {
         if (!cancelled) {
@@ -174,6 +178,8 @@ export default function DevicesScreen() {
       if (pollTimer) clearInterval(pollTimer);
     };
   }, []);
+
+  const showDeviceFilters = devices.length > 5;
 
   const filteredDevices = useMemo<ManagedDevice[]>(
     () =>
@@ -205,7 +211,7 @@ export default function DevicesScreen() {
     } catch (error) {
       console.log('updateManagedDevicePower failed', error);
       setDevices(snapshot);
-      setErrorMessage('Unable to send power command.');
+      setErrorMessage('Không thể gửi lệnh nguồn.');
     } finally {
       setPendingPowerId(null);
     }
@@ -228,7 +234,7 @@ export default function DevicesScreen() {
     } catch (error) {
       console.log('toggleManagedDeviceAutoMode failed', error);
       setDevices(snapshot);
-      setErrorMessage('Unable to update automation mode.');
+      setErrorMessage('Không thể cập nhật chế độ tự động.');
     } finally {
       setPendingModeId(null);
     }
@@ -296,7 +302,7 @@ export default function DevicesScreen() {
               </Text>
               {!isDesktop ? (
                 <Text style={styles.headerSubText}>
-                  {filteredDevices.length} device{filteredDevices.length === 1 ? '' : 's'}
+                  {filteredDevices.length} thiết bị
                 </Text>
               ) : null}
             </View>
@@ -320,16 +326,18 @@ export default function DevicesScreen() {
             {errorMessage ? <Text style={styles.errorBanner}>{errorMessage}</Text> : null}
 
             <View style={[styles.toolbar, !isDesktop && styles.mobileToolbar]}>
-              <View style={[styles.filterButton, !isDesktop && styles.mobileFilterButton]}>
-                <Text style={styles.filterText}>All</Text>
-                <Feather name="chevron-down" size={16} color={TEXT_PRIMARY} />
-              </View>
+              {showDeviceFilters ? (
+                <View style={[styles.filterButton, !isDesktop && styles.mobileFilterButton]}>
+                  <Text style={styles.filterText}>Tất cả</Text>
+                  <Feather name="chevron-down" size={16} color={TEXT_PRIMARY} />
+                </View>
+              ) : null}
 
-              <View style={[styles.searchWrap, !isDesktop && styles.mobileSearchWrap]}>
+              <View style={[styles.searchWrap, !isDesktop && styles.mobileSearchWrap, !showDeviceFilters && styles.searchWrapFull]}>
                 <Feather name="sliders" size={18} color="#8b8b8b" />
                 <TextInput
                   style={styles.searchInput}
-                  placeholder="Search"
+                  placeholder="Tìm kiếm"
                   placeholderTextColor="#9a9a9a"
                   value={search}
                   onChangeText={setSearch}
@@ -345,9 +353,9 @@ export default function DevicesScreen() {
                 <View style={styles.tablePanel}>
                   <View style={styles.tableHeader}>
                     <Text style={[styles.headerText, styles.idColumn]}>ID</Text>
-                    <Text style={[styles.headerText, styles.nameColumn]}>Device name</Text>
-                    <Text style={[styles.headerText, styles.switchColumn]}>Auto mode</Text>
-                    <Text style={[styles.headerText, styles.switchColumn]}>Power</Text>
+                    <Text style={[styles.headerText, styles.nameColumn]}>Tên thiết bị</Text>
+                    <Text style={[styles.headerText, styles.switchColumn]}>Tự động</Text>
+                    <Text style={[styles.headerText, styles.switchColumn]}>Nguồn</Text>
                   </View>
 
                   {loading ? (
@@ -358,7 +366,7 @@ export default function DevicesScreen() {
 
                   {!loading && pagedDevices.length === 0 ? (
                     <View style={styles.loadingRow}>
-                      <Text style={styles.emptyText}>No devices found.</Text>
+                      <Text style={styles.emptyText}>Không tìm thấy thiết bị.</Text>
                     </View>
                   ) : null}
 
@@ -406,72 +414,64 @@ export default function DevicesScreen() {
 
                 {!loading && pagedDevices.length === 0 ? (
                   <View style={styles.mobileLoadingCard}>
-                    <Text style={styles.emptyText}>No devices found.</Text>
+                    <Text style={styles.emptyText}>Không tìm thấy thiết bị.</Text>
                   </View>
                 ) : null}
 
                 {!loading
-                  ? pagedDevices.map((item: ManagedDevice) => (
-                      <View key={item.id} style={styles.deviceCard}>
-                        <View style={styles.deviceCardHeader}>
-                          <View style={styles.deviceIdentity}>
-                            <View style={styles.deviceIcon}>
-                              <DeviceIcon id={item.id} />
+                  ? pagedDevices.map((item: ManagedDevice) => {
+                      const online = deviceIsOnline(item.connectionStatus);
+                      return (
+                        <View key={item.id} style={styles.deviceCard}>
+                          <View style={styles.deviceCardCompact}>
+                            <View style={styles.deviceIdentity}>
+                              <View style={styles.deviceIcon}>
+                                <DeviceIcon id={item.id} />
+                              </View>
+                              <View style={styles.deviceTextWrap}>
+                                <Text style={styles.deviceName} numberOfLines={1}>
+                                  {item.name}
+                                </Text>
+                                <View style={styles.statusRow}>
+                                  <View
+                                    style={[
+                                      styles.statusDot,
+                                      online ? styles.statusDotOnline : styles.statusDotOffline,
+                                    ]}
+                                  />
+                                  <Text style={styles.statusLabel}>
+                                    {deviceStatusLabel(item.connectionStatus)}
+                                  </Text>
+                                </View>
+                              </View>
                             </View>
-                            <View style={styles.deviceTextWrap}>
-                              <Text style={styles.deviceName}>{item.name}</Text>
-                              <Text style={styles.deviceMeta}>ID {item.id}</Text>
-                            </View>
-                          </View>
 
-                          {item.connectionStatus !== 'unknown' ? (
-                            <View
-                              style={[styles.statusPill, statusPillStyle(item.connectionStatus)]}
-                            >
-                              <Text style={styles.statusText}>{item.connectionStatus}</Text>
+                            <View style={styles.deviceToggleColumn}>
+                              <View style={styles.toggleStack}>
+                                <Text style={styles.toggleLabel}>Tự động</Text>
+                                <Toggle
+                                  checked={item.autoMode}
+                                  loading={pendingModeId === item.id}
+                                  onChange={() => {
+                                    void handleAutoMode(item.id);
+                                  }}
+                                />
+                              </View>
+                              <View style={styles.toggleStack}>
+                                <Text style={styles.toggleLabel}>Nguồn</Text>
+                                <Toggle
+                                  checked={item.power}
+                                  loading={pendingPowerId === item.id}
+                                  onChange={(next) => {
+                                    void handlePower(item.id, next);
+                                  }}
+                                />
+                              </View>
                             </View>
-                          ) : null}
-                        </View>
-
-                        <View style={styles.mobileControls}>
-                          <View style={styles.mobileControlLine}>
-                            <View>
-                              <Text style={styles.mobileControlTitle}>Auto mode</Text>
-                              <Text style={styles.mobileControlMeta}>
-                                {pendingModeId === item.id
-                                  ? 'Updating'
-                                  : item.autoMode
-                                    ? 'On'
-                                    : 'Off'}
-                              </Text>
-                            </View>
-                            <Toggle
-                              checked={item.autoMode}
-                              loading={pendingModeId === item.id}
-                              onChange={() => {
-                                void handleAutoMode(item.id);
-                              }}
-                            />
-                          </View>
-
-                          <View style={styles.mobileControlLine}>
-                            <View>
-                              <Text style={styles.mobileControlTitle}>Power</Text>
-                              <Text style={styles.mobileControlMeta}>
-                                {pendingPowerId === item.id ? 'Sending' : item.power ? 'On' : 'Off'}
-                              </Text>
-                            </View>
-                            <Toggle
-                              checked={item.power}
-                              loading={pendingPowerId === item.id}
-                              onChange={(next) => {
-                                void handlePower(item.id, next);
-                              }}
-                            />
                           </View>
                         </View>
-                      </View>
-                    ))
+                      );
+                    })
                   : null}
               </View>
             )}
@@ -800,7 +800,7 @@ const styles = StyleSheet.create({
     color: TEXT_SECONDARY,
   },
   deviceList: {
-    gap: 14,
+    gap: 8,
   },
   mobileLoadingCard: {
     minHeight: 160,
@@ -811,15 +811,20 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   deviceCard: {
-    borderRadius: 22,
+    borderRadius: 16,
     backgroundColor: PANEL_BG,
-    padding: 16,
-    gap: 16,
+    padding: 12,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
     shadowRadius: 10,
     elevation: 1,
+  },
+  deviceCardCompact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
   },
   deviceCardHeader: {
     flexDirection: 'row',
@@ -835,9 +840,9 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   deviceIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 12,
     backgroundColor: '#f4f7f4',
     alignItems: 'center',
     justifyContent: 'center',
@@ -847,14 +852,60 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   deviceName: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '800',
     color: TEXT_PRIMARY,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+  },
+  statusDotOnline: {
+    backgroundColor: '#22c55e',
+  },
+  statusDotOffline: {
+    backgroundColor: '#9ca3af',
+  },
+  statusLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: TEXT_SECONDARY,
+  },
+  deviceToggleColumn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  toggleStack: {
+    alignItems: 'center',
+    gap: 4,
+  },
+  toggleLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: TEXT_SECONDARY,
+    textTransform: 'uppercase',
   },
   deviceMeta: {
     marginTop: 3,
     fontSize: 12,
     color: TEXT_SECONDARY,
+  },
+  deviceStatusLine: {
+    marginTop: 4,
+    fontSize: 12,
+    fontWeight: '600',
+    color: TEXT_SECONDARY,
+  },
+  searchWrapFull: {
+    flex: 1,
   },
   statusPill: {
     minHeight: 32,

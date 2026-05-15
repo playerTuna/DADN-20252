@@ -46,7 +46,7 @@ export default function ProfileScreen() {
           setDisplayName(nextProfile.displayName ?? "");
         }
       } catch {
-        if (!cancelled) setError("Unable to load profile.");
+        if (!cancelled) setError("Không thể tải hồ sơ.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -59,7 +59,7 @@ export default function ProfileScreen() {
   const handleSave = async () => {
     const trimmed = displayName.trim();
     if (!trimmed) {
-      setError("Display name cannot be empty.");
+      setError("Tên hiển thị không được để trống.");
       setSuccess(null);
       return;
     }
@@ -71,9 +71,9 @@ export default function ProfileScreen() {
       const nextProfile = await updateUserProfile({ displayName: trimmed });
       setProfile(nextProfile);
       setDisplayName(nextProfile.displayName ?? trimmed);
-      setSuccess("Profile updated.");
+      setSuccess("Đã cập nhật hồ sơ.");
     } catch {
-      setError("Unable to save profile.");
+      setError("Không thể lưu hồ sơ.");
     } finally {
       setSaving(false);
     }
@@ -84,41 +84,39 @@ export default function ProfileScreen() {
       <View style={styles.page}>
         <Pressable onPress={() => router.back()} style={styles.backButton}>
           <Feather name="arrow-left" size={18} color="#111111" />
-          <Text style={styles.backText}>Back</Text>
+          <Text style={styles.backText}>Quay lại</Text>
         </Pressable>
         <View style={styles.panel}>
-          <Text style={styles.title}>Profile</Text>
+          <Text style={styles.title}>Hồ sơ</Text>
           {loading ? <ActivityIndicator size="large" color="#22c55e" /> : null}
           {!loading && error ? <Text style={styles.errorText}>{error}</Text> : null}
           {!loading && success ? <Text style={styles.successText}>{success}</Text> : null}
           {!loading && !error && profile ? (
             <View style={styles.infoWrap}>
-              <Text style={styles.label}>Display name</Text>
+              <Text style={styles.label}>Tên hiển thị</Text>
               <TextInput
                 value={displayName}
                 onChangeText={(value) => {
                   setDisplayName(value);
-                  if (success) setSuccess(null);
+                  setSuccess(null);
                 }}
-                editable={!saving}
-                placeholder="Display name"
                 style={styles.input}
+                placeholder="Tên của bạn"
+                placeholderTextColor="#9ca3af"
               />
               <Text style={styles.label}>Email</Text>
-              <Text style={styles.value}>{profile.email || "Unavailable"}</Text>
-              <Text style={styles.label}>User ID</Text>
-              <Text style={styles.value}>{profile.id || "Unavailable"}</Text>
+              <Text style={styles.readonly}>{profile.email || "Không có"}</Text>
+              <Text style={styles.label}>ID người dùng</Text>
+              <Text style={styles.readonly}>{profile.id || "Không có"}</Text>
               <Pressable
-                onPress={() => {
-                  void handleSave();
-                }}
+                onPress={() => void handleSave()}
                 disabled={saving}
                 style={[styles.saveButton, saving && styles.saveButtonDisabled]}
               >
                 {saving ? (
-                  <ActivityIndicator size="small" color="#ffffff" />
+                  <ActivityIndicator color="#ffffff" />
                 ) : (
-                  <Text style={styles.saveButtonText}>Save profile</Text>
+                  <Text style={styles.saveButtonText}>Lưu hồ sơ</Text>
                 )}
               </Pressable>
             </View>
@@ -131,47 +129,38 @@ export default function ProfileScreen() {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: PAGE_BG },
-  page: { flex: 1, padding: 20, gap: 16 },
+  page: { flex: 1, padding: 24, gap: 16 },
   backButton: { flexDirection: "row", alignItems: "center", gap: 8 },
-  backText: { fontSize: 14, fontWeight: "600", color: "#111111" },
+  backText: { fontSize: 15, fontWeight: "600", color: "#111111" },
   panel: {
     backgroundColor: "#ffffff",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
+    borderRadius: 16,
     padding: 20,
-    gap: 14,
+    gap: 12,
   },
-  title: { fontSize: 20, fontWeight: "700", color: "#111111" },
-  infoWrap: { gap: 6 },
-  label: { fontSize: 12, color: "#6b7280", textTransform: "uppercase" },
-  value: { fontSize: 15, color: "#111111" },
+  title: { fontSize: 24, fontWeight: "800", color: "#111111" },
+  infoWrap: { gap: 10 },
+  label: { fontSize: 13, fontWeight: "700", color: "#374151" },
   input: {
-    height: 44,
     borderWidth: 1,
     borderColor: "#d1d5db",
-    borderRadius: 10,
-    paddingHorizontal: 12,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     fontSize: 15,
     color: "#111111",
-    backgroundColor: "#ffffff",
+    marginBottom: 8,
   },
+  readonly: { fontSize: 15, color: "#4b5563", marginBottom: 8 },
   saveButton: {
-    marginTop: 12,
-    height: 44,
-    borderRadius: 10,
-    backgroundColor: "#111111",
+    marginTop: 8,
+    backgroundColor: "#22c55e",
+    borderRadius: 12,
+    paddingVertical: 14,
     alignItems: "center",
-    justifyContent: "center",
   },
-  saveButtonDisabled: {
-    opacity: 0.7,
-  },
-  saveButtonText: {
-    color: "#ffffff",
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  errorText: { color: "#b91c1c", fontSize: 14 },
-  successText: { color: "#166534", fontSize: 14 },
+  saveButtonDisabled: { opacity: 0.7 },
+  saveButtonText: { color: "#ffffff", fontWeight: "700", fontSize: 15 },
+  errorText: { color: "#dc2626", fontWeight: "600" },
+  successText: { color: "#16a34a", fontWeight: "600" },
 });

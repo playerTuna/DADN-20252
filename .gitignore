@@ -10,5 +10,13 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 package-lock.json
+.idea
+.vscode
+.expo
+.cursor
+.cursorrules
+.cursorignore
+.cursorignorerules
+.cursorignorerules
 
 *.tsbuildinfo

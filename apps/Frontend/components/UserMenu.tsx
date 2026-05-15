@@ -123,7 +123,7 @@ export function UserMenu({ userName, userEmail }: UserMenuProps) {
       <Modal visible={isOpen} transparent animationType="none" onRequestClose={closeMenu}>
         <View style={styles.modalRoot}>
           <Pressable
-            accessibilityLabel="Close user menu"
+            accessibilityLabel="Đóng menu tài khoản"
             onPress={closeMenu}
             style={styles.backdrop}
           />
@@ -146,7 +146,7 @@ export function UserMenu({ userName, userEmail }: UserMenuProps) {
 
                 <View style={styles.menuTextWrap}>
                   <Text style={styles.menuTitle} numberOfLines={1}>
-                    Profile
+                    Hồ sơ
                   </Text>
                   {userEmail ? (
                     <Text style={styles.menuSubtitle} numberOfLines={1}>
@@ -162,7 +162,7 @@ export function UserMenu({ userName, userEmail }: UserMenuProps) {
                 </View>
 
                 <Text style={styles.menuTitle} numberOfLines={1}>
-                  Settings
+                  Cài đặt
                 </Text>
               </Pressable>
 
@@ -174,7 +174,7 @@ export function UserMenu({ userName, userEmail }: UserMenuProps) {
                 </View>
 
                 <Text style={styles.logoutText} numberOfLines={1}>
-                  Logout
+                  Đăng xuất
                 </Text>
               </Pressable>
             </Animated.View>
@@ -200,7 +200,7 @@ export function UserMenu({ userName, userEmail }: UserMenuProps) {
 
           <View style={styles.identity}>
             <Text style={styles.userName} numberOfLines={1}>
-              {userName || 'User'}
+              {userName || 'Người dùng'}
             </Text>
           </View>
 

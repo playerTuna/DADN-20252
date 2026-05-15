@@ -55,36 +55,36 @@ function buildFriendlyAuthError(path: string, status: number, text: string): str
 
   if (path === '/auth/login') {
     if (status === 401 || backendMessage.includes('invalid credentials')) {
-      return 'Email or password is incorrect.';
+      return 'Email hoặc mật khẩu không đúng.';
     }
-    if (status === 400) return 'Login information is not valid.';
-    return 'Sign in failed. Please try again.';
+    if (status === 400) return 'Thông tin đăng nhập không hợp lệ.';
+    return 'Đăng nhập thất bại. Vui lòng thử lại.';
   }
 
   if (path === '/auth/register') {
     if (backendMessage.includes('already registered')) {
-      return 'Email is already registered.';
+      return 'Email đã được đăng ký.';
     }
-    if (status === 400) return 'Registration information is not valid.';
-    return 'Registration failed. Please try again.';
+    if (status === 400) return 'Thông tin đăng ký không hợp lệ.';
+    return 'Đăng ký thất bại. Vui lòng thử lại.';
   }
 
-  if (path === '/auth/refresh') return 'Your session expired. Please sign in again.';
-  if (path === '/auth/logout') return 'Sign out failed. Please try again.';
-  return 'Authentication failed. Please try again.';
+  if (path === '/auth/refresh') return 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.';
+  if (path === '/auth/logout') return 'Đăng xuất thất bại. Vui lòng thử lại.';
+  return 'Xác thực thất bại. Vui lòng thử lại.';
 }
 
 export function validateEmailInput(email: string): string | null {
   const trimmed = email.trim();
-  if (!trimmed) return 'Please enter an email.';
-  if (!EMAIL_REGEX.test(trimmed)) return 'Email is not valid.';
+  if (!trimmed) return 'Vui lòng nhập email.';
+  if (!EMAIL_REGEX.test(trimmed)) return 'Email không hợp lệ.';
   return null;
 }
 
 export function validatePasswordInput(password: string): string | null {
-  if (!password) return 'Please enter a password.';
+  if (!password) return 'Vui lòng nhập mật khẩu.';
   if (!STRONG_PASSWORD_REGEX.test(password)) {
-    return 'Password must be 8 to 64 characters and include letters and numbers.';
+    return 'Mật khẩu phải từ 8–64 ký tự và có cả chữ lẫn số.';
   }
   return null;
 }
@@ -136,7 +136,7 @@ export async function login(email: string, password: string): Promise<AuthRespon
 
 export async function refresh(): Promise<Tokens> {
   const tokens = await getTokens();
-  if (!tokens) throw new Error('No refresh token');
+  if (!tokens) throw new Error('Không có refresh token');
   const data = await authPost<Tokens>('/auth/refresh', { refreshToken: tokens.refreshToken });
   await setTokens(data);
   return data;

@@ -1,24 +1,38 @@
 import {
   IsBoolean,
   IsIn,
-  IsInt,
+  IsNumber,
   IsOptional,
   IsString,
-  Max,
-  Min,
   ValidateNested,
-} from "class-validator";
-import { Type } from "class-transformer";
+} from 'class-validator';
+import { Type } from 'class-transformer';
 
-class ThresholdDto {
-  @IsIn(["<", ">"])
-  operator!: "<" | ">";
+class ConditionDto {
+  @IsIn(['soilMoisture', 'temperature', 'light'])
+  sensorKey!: 'soilMoisture' | 'temperature' | 'light';
 
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  @Max(1000)
+  @IsIn(['<', '>'])
+  operator!: '<' | '>';
+
+  @IsNumber()
   value!: number;
+}
+
+class ScheduleDto {
+  @IsString()
+  time!: string;
+
+  @IsIn(['ON', 'OFF'])
+  action!: 'ON' | 'OFF';
+
+  @IsBoolean()
+  enabled!: boolean;
+
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => ConditionDto)
+  conditions?: ConditionDto[];
 }
 
 export class UpdateAutomationRuleDto {
@@ -27,18 +41,19 @@ export class UpdateAutomationRuleDto {
   enabled?: boolean;
 
   @IsOptional()
-  @IsIn(["soilMoisture", "temperature", "light"])
-  sensorKey?: "soilMoisture" | "temperature" | "light";
+  @ValidateNested({ each: true })
+  @Type(() => ConditionDto)
+  turnOnConditions?: ConditionDto[];
 
   @IsOptional()
-  @ValidateNested()
-  @Type(() => ThresholdDto)
-  turnOnWhen?: ThresholdDto;
+  @ValidateNested({ each: true })
+  @Type(() => ConditionDto)
+  turnOffConditions?: ConditionDto[];
 
   @IsOptional()
-  @ValidateNested()
-  @Type(() => ThresholdDto)
-  turnOffWhen?: ThresholdDto;
+  @ValidateNested({ each: true })
+  @Type(() => ScheduleDto)
+  schedules?: ScheduleDto[];
 
   @IsOptional()
   @IsString()

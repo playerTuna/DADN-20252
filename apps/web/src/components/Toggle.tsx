@@ -16,13 +16,13 @@ export function Toggle({ checked, onChange, disabled = false, loading = false, l
         type="button"
         className={`toggle ${checked ? 'is-on' : ''}`}
         aria-pressed={checked}
-        aria-label={label ?? 'Toggle'}
+        aria-label={label ?? 'Công tắc'}
         disabled={dimmed}
         onClick={() => onChange(!checked)}
       >
         <span className="toggle-thumb" />
       </button>
-      {loading ? <span className="mini-spinner" aria-label="Updating" /> : null}
+      {loading ? <span className="mini-spinner" aria-label="Đang cập nhật" /> : null}
     </label>
   );
 }

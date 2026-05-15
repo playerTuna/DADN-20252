@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { getDashboard, getTelemetryHistory, type TelemetryPoint } from '../services/api';
 
 type AnalyticsTab = 'temp' | 'air_humidity' | 'soil_humidity' | 'light';
 
 const TAB_LABELS: Record<AnalyticsTab, string> = {
-  temp: 'Temperature',
-  air_humidity: 'Air Humidity',
-  soil_humidity: 'Soil Humidity',
-  light: 'Light Intensity',
+  temp: 'Nhiệt độ',
+  air_humidity: 'Độ ẩm không khí',
+  soil_humidity: 'Độ ẩm đất',
+  light: 'Cường độ ánh sáng',
 };
 
 const TAB_ICONS: Record<AnalyticsTab, string> = {
@@ -15,6 +16,13 @@ const TAB_ICONS: Record<AnalyticsTab, string> = {
   air_humidity: '%',
   soil_humidity: '🌱',
   light: '☀',
+};
+
+const TAB_UNITS: Record<AnalyticsTab, string> = {
+  temp: '°C',
+  air_humidity: '%',
+  soil_humidity: '%',
+  light: 'lx',
 };
 
 function formatTime(value: string) {
@@ -34,10 +42,17 @@ function formatNumber(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
+function formatStatWithUnit(tab: AnalyticsTab, value?: number) {
+  if (value === undefined) return '—';
+  const formatted = formatNumber(value);
+  const unit = TAB_UNITS[tab];
+  return unit === '°C' ? `${formatted}°C` : `${formatted} ${unit}`;
+}
+
 export function AnalyticsPage() {
   const [activeTab, setActiveTab] = useState<AnalyticsTab>('temp');
   const [series, setSeries] = useState<TelemetryPoint[]>([]);
-  const [pageTitle, setPageTitle] = useState('Environment Analytics');
+  const [pageTitle, setPageTitle] = useState('Phân tích môi trường');
   const [loading, setLoading] = useState(true);
   const [chartLoading, setChartLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -56,13 +71,13 @@ export function AnalyticsPage() {
         const title = dashboard.analytics?.title;
 
         setPageTitle(
-          !title || title === 'Analytics - Dashboards' ? 'Environment Analytics' : title
+          !title || title === 'Analytics - Dashboards' ? 'Phân tích môi trường' : title
         );
       } catch (error) {
         console.error('Failed to load analytics dashboard', error);
 
         if (!cancelled) {
-          setErrorMessage('Unable to load analytics dashboard.');
+          setErrorMessage('Không thể tải bảng phân tích.');
         }
       } finally {
         if (!cancelled) {
@@ -95,7 +110,7 @@ export function AnalyticsPage() {
         console.error('Failed to load telemetry history', error);
 
         if (!cancelled) {
-          setErrorMessage('Unable to load telemetry history.');
+          setErrorMessage('Không thể tải lịch sử telemetry.');
           setSeries([]);
         }
       } finally {
@@ -114,7 +129,6 @@ export function AnalyticsPage() {
 
   const values = useMemo(() => series.map((item) => item.numericValue), [series]);
 
-  const latest = values.length > 0 ? values[0] : undefined;
   const min = values.length > 0 ? Math.min(...values) : undefined;
   const max = values.length > 0 ? Math.max(...values) : undefined;
   const average =
@@ -156,11 +170,10 @@ export function AnalyticsPage() {
     <div className="page-stack">
       <header className="page-header panel">
         <div>
-          <p className="eyebrow">Analytics</p>
+          <p className="eyebrow">Phân tích</p>
           <h1>{pageTitle}</h1>
           <p>
-            Monitor temperature, humidity, soil moisture and light intensity from your smart home
-            sensors.
+            Theo dõi nhiệt độ, độ ẩm, độ ẩm đất và cường độ ánh sáng từ cảm biến Smart Farm.
           </p>
         </div>
 
@@ -169,37 +182,11 @@ export function AnalyticsPage() {
 
       {errorMessage ? <div className="status-message error">{errorMessage}</div> : null}
 
-      <section className="stat-grid">
-        <article className="stat-card">
-          <span className="stat-icon">{TAB_ICONS[activeTab]}</span>
-          <span>Latest</span>
-          <strong>{latest === undefined ? '-' : formatNumber(latest)}</strong>
-        </article>
-
-        <article className="stat-card">
-          <span className="stat-icon">Min</span>
-          <span>Minimum</span>
-          <strong>{min === undefined ? '-' : formatNumber(min)}</strong>
-        </article>
-
-        <article className="stat-card">
-          <span className="stat-icon">Max</span>
-          <span>Maximum</span>
-          <strong>{max === undefined ? '-' : formatNumber(max)}</strong>
-        </article>
-
-        <article className="stat-card">
-          <span className="stat-icon">Avg</span>
-          <span>Average</span>
-          <strong>{average === undefined ? '-' : formatNumber(Number(average))}</strong>
-        </article>
-      </section>
-
       <section className="panel">
         <div className="section-heading">
           <div>
             <h2>{TAB_LABELS[activeTab]}</h2>
-            <p>Recent telemetry history</p>
+            <p>Lịch sử telemetry gần đây</p>
           </div>
 
           {chartLoading ? <span className="mini-spinner" /> : null}
@@ -218,6 +205,26 @@ export function AnalyticsPage() {
           ))}
         </div>
 
+        <Link to="/weekly-report" className="weekly-report-banner">
+          <span>📋 Xem báo cáo tổng kết tuần này</span>
+          <span aria-hidden="true">→</span>
+        </Link>
+
+        <div className="analytics-mini-stats" aria-label="Tóm tắt biểu đồ">
+          <article className="analytics-mini-stat">
+            <span>TB</span>
+            <strong>{formatStatWithUnit(activeTab, average)}</strong>
+          </article>
+          <article className="analytics-mini-stat">
+            <span>Thấp nhất</span>
+            <strong>{formatStatWithUnit(activeTab, min)}</strong>
+          </article>
+          <article className="analytics-mini-stat">
+            <span>Cao nhất</span>
+            <strong>{formatStatWithUnit(activeTab, max)}</strong>
+          </article>
+        </div>
+
         <div className="analytics-chart-panel">
           {loading || chartLoading ? (
             <div className="empty-panel">
@@ -225,7 +232,7 @@ export function AnalyticsPage() {
             </div>
           ) : chartRows.length === 0 ? (
             <div className="empty-panel">
-              <p className="empty-text">No telemetry history available.</p>
+              <p className="empty-text">Chưa có lịch sử telemetry.</p>
             </div>
           ) : (
             <>
@@ -266,7 +273,7 @@ export function AnalyticsPage() {
       <section className="device-grid">
         {recentRows.length === 0 ? (
           <div className="panel empty-panel">
-            <p className="empty-text">No recent readings.</p>
+            <p className="empty-text">Chưa có số liệu gần đây.</p>
           </div>
         ) : (
           recentRows.map((item) => (
@@ -286,12 +293,12 @@ export function AnalyticsPage() {
 
               <dl className="device-meta-grid">
                 <div>
-                  <dt>Sensor</dt>
+                  <dt>Cảm biến</dt>
                   <dd>{TAB_LABELS[activeTab]}</dd>
                 </div>
 
                 <div>
-                  <dt>Received</dt>
+                  <dt>Nhận lúc</dt>
                   <dd>{formatTime(item.receivedAt)}</dd>
                 </div>
               </dl>

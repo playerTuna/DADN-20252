@@ -28,7 +28,7 @@ export function AuthPage({ mode }: AuthPageProps) {
     if (emailError) return emailError;
     const passwordError = validatePasswordInput(password);
     if (passwordError) return passwordError;
-    if (isRegister && confirmPassword !== password) return 'Passwords do not match.';
+    if (isRegister && confirmPassword !== password) return 'Mật khẩu xác nhận không khớp.';
     return null;
   };
 
@@ -50,7 +50,7 @@ export function AuthPage({ mode }: AuthPageProps) {
       }
       navigate('/home', { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Authentication failed.');
+      setError(err instanceof Error ? err.message : 'Xác thực thất bại.');
     } finally {
       setSubmitting(false);
     }
@@ -63,16 +63,16 @@ export function AuthPage({ mode }: AuthPageProps) {
           <img src={logoUrl} alt="Smart Farm" className="auth-logo" />
         </div>
         <p className="eyebrow">Smart Farm</p>
-        <h1 id="auth-title">{isRegister ? 'Create account' : 'Welcome back'}</h1>
+        <h1 id="auth-title">{isRegister ? 'Tạo tài khoản' : 'Chào mừng trở lại'}</h1>
         <p className="auth-copy">
-          Monitor farm conditions, manage devices, and keep automation settings close at hand.
+          Theo dõi điều kiện nông trại, quản lý thiết bị và cài đặt tự động hóa ngay trên bảng điều khiển.
         </p>
       </section>
 
       <form className="auth-card" onSubmit={handleSubmit}>
         <div>
-          <h2>{isRegister ? 'Register' : 'Sign in'}</h2>
-          <p>{isRegister ? 'Set up your dashboard access.' : 'Continue to your dashboard.'}</p>
+          <h2>{isRegister ? 'Đăng ký' : 'Đăng nhập'}</h2>
+          <p>{isRegister ? 'Thiết lập quyền truy cập bảng điều khiển.' : 'Tiếp tục vào bảng điều khiển của bạn.'}</p>
         </div>
 
         <label className="form-field">
@@ -87,29 +87,29 @@ export function AuthPage({ mode }: AuthPageProps) {
         </label>
 
         <label className="form-field">
-          <span>Password</span>
+          <span>Mật khẩu</span>
           <div className="password-input">
             <input
               type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              placeholder="Enter your password"
+              placeholder="Nhập mật khẩu"
               autoComplete={isRegister ? 'new-password' : 'current-password'}
             />
             <button type="button" onClick={() => setShowPassword((current) => !current)}>
-              {showPassword ? 'Hide' : 'Show'}
+              {showPassword ? 'Ẩn' : 'Hiện'}
             </button>
           </div>
         </label>
 
         {isRegister ? (
           <label className="form-field">
-            <span>Confirm password</span>
+            <span>Xác nhận mật khẩu</span>
             <input
               type={showPassword ? 'text' : 'password'}
               value={confirmPassword}
               onChange={(event) => setConfirmPassword(event.target.value)}
-              placeholder="Repeat your password"
+              placeholder="Nhập lại mật khẩu"
               autoComplete="new-password"
             />
           </label>
@@ -118,12 +118,12 @@ export function AuthPage({ mode }: AuthPageProps) {
         {error ? <div className="form-error">{error}</div> : null}
 
         <button className="primary-button" type="submit" disabled={submitting}>
-          {submitting ? 'Please wait...' : isRegister ? 'Create account' : 'Sign in'}
+          {submitting ? 'Vui lòng đợi...' : isRegister ? 'Tạo tài khoản' : 'Đăng nhập'}
         </button>
 
         <p className="auth-switch">
-          {isRegister ? 'Already have an account?' : "Don't have an account?"}{' '}
-          <Link to={isRegister ? '/' : '/register'}>{isRegister ? 'Sign in' : 'Register'}</Link>
+          {isRegister ? 'Đã có tài khoản?' : 'Chưa có tài khoản?'}{' '}
+          <Link to={isRegister ? '/' : '/register'}>{isRegister ? 'Đăng nhập' : 'Đăng ký'}</Link>
         </p>
       </form>
     </main>

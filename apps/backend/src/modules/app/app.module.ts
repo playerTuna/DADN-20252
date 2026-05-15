@@ -10,6 +10,7 @@ import { CommandModule } from "../command/command.module";
 import { AuthModule } from "../auth/auth.module";
 import { UsersModule } from "../users/users.module";
 import { AutomationModule } from "../automation/automation.module";
+import { AnalyticsModule } from "../analytics/analytics.module";
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { AutomationModule } from "../automation/automation.module";
     UsersModule,
     AuthModule,
     AutomationModule,
+    AnalyticsModule,
   ],
 })
 export class AppModule {}

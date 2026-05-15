@@ -1,15 +1,23 @@
 import { randomUUID } from 'crypto';
 import { forwardRef, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { Model, Types } from 'mongoose';
 import { AutomationLog } from './entity/automation-log.schema';
 import { AutomationRuleEntity } from './entity/automation-rule.schema';
 import { DeviceState } from '../users/entity/device-state.schema';
 import { Device } from '../users/entity/device.schema';
 import { User } from '../users/entity/user.schema';
+import { Telemetry } from '../telemetry/entity/telemetry.schema';
 import { CommandService } from '../command/command.service';
+import { ControllableDeviceKey } from '../command/dto/command.dto';
 import { IngestMqttMessage } from '../telemetry/telemetry.types';
-import { AutomationLogEntry, AutomationRule, AutomationSensorKey } from './automation.types';
+import {
+  AutomationCondition,
+  AutomationLogEntry,
+  AutomationRule,
+  AutomationSensorKey,
+} from './automation.types';
 import { defaultAutomationRules, defaultManagedDevices } from '../users/users.defaults';
 import { UpdateAutomationRuleDto } from './dto/update-automation-rule.dto';
 
@@ -28,6 +36,8 @@ export class AutomationService {
     private readonly automationRuleModel: Model<AutomationRuleEntity>,
     @InjectModel(AutomationLog.name)
     private readonly automationLogModel: Model<AutomationLog>,
+    @InjectModel(Telemetry.name)
+    private readonly telemetryModel: Model<Telemetry>,
     @Inject(forwardRef(() => CommandService))
     private readonly commandService: CommandService
   ) {}
@@ -60,15 +70,16 @@ export class AutomationService {
     if (!currentRule) {
       throw new NotFoundException(`Automation rule not found for ${deviceId}`);
     }
+
     await this.automationRuleModel
       .updateOne(
         { userId: this.toObjectId(userId), deviceId },
         {
           $set: {
             enabled: dto.enabled ?? currentRule.enabled,
-            sensorKey: dto.sensorKey ?? currentRule.sensorKey,
-            turnOnWhen: dto.turnOnWhen ?? currentRule.turnOnWhen,
-            turnOffWhen: dto.turnOffWhen ?? currentRule.turnOffWhen,
+            turnOnConditions: dto.turnOnConditions ?? currentRule.turnOnConditions,
+            turnOffConditions: dto.turnOffConditions ?? currentRule.turnOffConditions,
+            schedules: dto.schedules ?? currentRule.schedules,
             onPayload: dto.onPayload ?? currentRule.onPayload,
             offPayload: dto.offPayload ?? currentRule.offPayload,
           },
@@ -123,6 +134,76 @@ export class AutomationService {
     };
   }
 
+  @Cron(CronExpression.EVERY_MINUTE)
+  async checkSchedules() {
+    const now = new Date();
+    // Format to HH:mm in UTC+7 (assumed server/user locality)
+    // For simplicity, we use local time formatted as HH:mm
+    const currentTimeStr = now.toLocaleTimeString('en-GB', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+      timeZone: 'Asia/Ho_Chi_Minh',
+    });
+
+    const activeRules = (await this.automationRuleModel
+      .find({
+        enabled: true,
+        'schedules.enabled': true,
+        'schedules.time': currentTimeStr,
+      })
+      .lean()
+      .exec()) as unknown as AutomationRuleEntity[];
+
+    for (const rule of activeRules) {
+      const userId = String(rule.userId);
+      const matchingSchedules = rule.schedules.filter(
+        (s) => s.enabled && s.time === currentTimeStr
+      );
+
+      if (matchingSchedules.length > 0) {
+        const latestTelemetry = await this.getLatestValuesForUser(userId);
+
+        for (const schedule of matchingSchedules) {
+          // Evaluate Hybrid Conditions if present
+          if (schedule.conditions && schedule.conditions.length > 0) {
+            const conditionsMet = schedule.conditions.every((cond) =>
+              this.matchesThreshold(latestTelemetry.get(cond.sensorKey) ?? 0, cond)
+            );
+            if (!conditionsMet) continue;
+          }
+
+          const payload = schedule.action === 'ON' ? (rule.onPayload ?? 'ON') : (rule.offPayload ?? 'OFF');
+          let reason = `Scheduled at ${schedule.time} (${schedule.action})`;
+          if (schedule.conditions && schedule.conditions.length > 0) {
+            reason += ` + Hybrid Conditions Met`;
+          }
+
+        try {
+          const result = await this.commandService.sendCommand(rule.target as ControllableDeviceKey, payload, {
+            userId,
+            source: 'automation',
+          });
+          await this.appendAutomationLog(userId, {
+            id: randomUUID(),
+            deviceId: rule.deviceId,
+            target: rule.target,
+            action: schedule.action,
+            payload,
+            reason,
+            status: 'sent',
+            createdAt: new Date(),
+            commandId: result.commandId,
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Unknown automation schedule error';
+          this.logger.error(`Schedule failed for ${rule.deviceId}: ${message}`);
+        }
+        }
+      }
+    }
+  }
+
   async evaluateTelemetry(msg: IngestMqttMessage & { numericValue?: number }) {
     const sensorKey = this.mapTelemetryToSensorKey(msg.logicalKey);
     if (!sensorKey || typeof msg.numericValue !== 'number') {
@@ -131,57 +212,67 @@ export class AutomationService {
 
     const users = await this.userModel.find({}).lean().exec();
     for (const user of users) {
-      await this.ensureAutomationState(String(user._id));
-      const [rules, states] = await Promise.all([
+      const userId = String(user._id);
+      await this.ensureAutomationState(userId);
+
+      const [rules, states, latestTelemetry] = await Promise.all([
         this.automationRuleModel
           .find({
-            userId: this.toObjectId(String(user._id)),
+            userId: this.toObjectId(userId),
             enabled: true,
-            sensorKey,
+            $or: [
+              { 'turnOnConditions.sensorKey': sensorKey },
+              { 'turnOffConditions.sensorKey': sensorKey },
+            ],
           })
           .lean()
           .exec(),
-        this.deviceStateModel
-          .find({ userId: this.toObjectId(String(user._id)) })
-          .lean()
-          .exec(),
+        this.deviceStateModel.find({ userId: this.toObjectId(userId) }).lean().exec(),
+        this.getLatestValuesForUser(userId),
       ]);
-      const stateByKey = new Map(states.map((state) => [state.deviceKey, state]));
-      const matchingRules = rules.filter(
-        (rule) => rule.enabled && rule.sensorKey === sensorKey
-      ) as AutomationRule[];
 
-      for (const rule of matchingRules) {
+      // Overlay the incoming message's value onto the latest telemetry map
+      latestTelemetry.set(sensorKey, msg.numericValue);
+
+      const stateByKey = new Map(states.map((state) => [state.deviceKey, state]));
+
+      for (const rule of rules as unknown as AutomationRule[]) {
         const device = stateByKey.get(rule.deviceId);
         if (!device) continue;
 
         const desiredAction = this.resolveDesiredAction(
           device.desiredPower ?? device.power,
-          msg.numericValue,
+          latestTelemetry,
           rule
         );
+
         if (!desiredAction) continue;
 
         const payload =
           desiredAction === 'ON'
             ? (rule.onPayload ?? desiredAction)
             : (rule.offPayload ?? desiredAction);
-        const reason = `${rule.sensorKey}=${msg.numericValue} matched ${desiredAction === 'ON' ? 'turnOnWhen' : 'turnOffWhen'}`;
+
+        // Build reason string for multiple conditions
+        const conditions = desiredAction === 'ON' ? rule.turnOnConditions : rule.turnOffConditions;
+        const reason = conditions
+          .map((c) => `${c.sensorKey}(${latestTelemetry.get(c.sensorKey)})${c.operator}${c.value}`)
+          .join(' AND ');
 
         try {
-          const result = await this.commandService.sendCommand(rule.target, payload, {
-            userId: String(user._id),
+          const result = await this.commandService.sendCommand(rule.target as ControllableDeviceKey, payload, {
+            userId,
             source: 'automation',
           });
-          await this.appendAutomationLog(String(user._id), {
+          await this.appendAutomationLog(userId, {
             id: randomUUID(),
             deviceId: rule.deviceId,
             target: rule.target,
-            sensorKey: rule.sensorKey,
+            sensorKey,
             sensorValue: msg.numericValue,
             action: desiredAction,
             payload,
-            reason,
+            reason: `Threshold met: ${reason}`,
             status: 'sent',
             createdAt: new Date(),
             commandId: result.commandId,
@@ -189,15 +280,15 @@ export class AutomationService {
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Unknown automation error';
           this.logger.warn(`Automation failed for ${rule.deviceId}: ${message}`);
-          await this.appendAutomationLog(String(user._id), {
+          await this.appendAutomationLog(userId, {
             id: randomUUID(),
             deviceId: rule.deviceId,
             target: rule.target,
-            sensorKey: rule.sensorKey,
+            sensorKey,
             sensorValue: msg.numericValue,
             action: desiredAction,
             payload,
-            reason,
+            reason: `Threshold error: ${reason}`,
             status: 'failed',
             createdAt: new Date(),
             error: message,
@@ -207,31 +298,73 @@ export class AutomationService {
     }
   }
 
+  private async getLatestValuesForUser(userId: string): Promise<Map<AutomationSensorKey, number>> {
+    const sensorKeys: AutomationSensorKey[] = ['soilMoisture', 'temperature', 'light'];
+    const values = new Map<AutomationSensorKey, number>();
+
+    const results = await Promise.all(
+      sensorKeys.map((key) =>
+        this.telemetryModel
+          .findOne({ type: this.mapSensorKeyToTelemetryType(key) })
+          .sort({ receivedAt: -1 })
+          .lean()
+          .exec()
+      )
+    );
+
+    results.forEach((res, i) => {
+      if (res && typeof res.numericValue === 'number') {
+        values.set(sensorKeys[i], res.numericValue);
+      } else {
+        // Default values if no telemetry exists yet
+        values.set(sensorKeys[i], 0);
+      }
+    });
+
+    return values;
+  }
+
   private resolveDesiredAction(
     currentPower: boolean,
-    sensorValue: number,
+    latestValues: Map<AutomationSensorKey, number>,
     rule: AutomationRule
   ): 'ON' | 'OFF' | null {
-    if (!currentPower && this.matchesThreshold(sensorValue, rule.turnOnWhen)) {
-      return 'ON';
+    // Check Turn ON conditions (AND logic)
+    if (!currentPower && rule.turnOnConditions.length > 0) {
+      const allOnMet = rule.turnOnConditions.every((cond) =>
+        this.matchesThreshold(latestValues.get(cond.sensorKey) ?? 0, cond)
+      );
+      if (allOnMet) return 'ON';
     }
-    if (currentPower && this.matchesThreshold(sensorValue, rule.turnOffWhen)) {
-      return 'OFF';
+
+    // Check Turn OFF conditions (AND logic)
+    if (currentPower && rule.turnOffConditions.length > 0) {
+      const allOffMet = rule.turnOffConditions.every((cond) =>
+        this.matchesThreshold(latestValues.get(cond.sensorKey) ?? 0, cond)
+      );
+      if (allOffMet) return 'OFF';
     }
+
     return null;
   }
 
-  private matchesThreshold(value: number, threshold: AutomationRule['turnOnWhen']) {
-    return threshold.operator === '<' ? value < threshold.value : value > threshold.value;
+  private matchesThreshold(value: number, condition: AutomationCondition) {
+    return condition.operator === '<' ? value < condition.value : value > condition.value;
   }
 
   private mapTelemetryToSensorKey(
-    logicalKey: IngestMqttMessage['logicalKey']
+    logicalKey: string
   ): AutomationSensorKey | null {
     if (logicalKey === 'soil_humidity') return 'soilMoisture';
     if (logicalKey === 'temp') return 'temperature';
     if (logicalKey === 'light') return 'light';
     return null;
+  }
+
+  private mapSensorKeyToTelemetryType(key: AutomationSensorKey): string {
+    if (key === 'soilMoisture') return 'soil_humidity';
+    if (key === 'temperature') return 'temp';
+    return 'light';
   }
 
   private async appendAutomationLog(userId: string, entry: AutomationLogEntry) {

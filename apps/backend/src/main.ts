@@ -13,6 +13,10 @@ function resolveCorsOrigin(): boolean | string[] {
       'http://127.0.0.1:3000',
       'http://localhost:4200',
       'http://127.0.0.1:4200',
+      'http://localhost:19006',
+      'http://127.0.0.1:19006',
+      'http://localhost:19000',
+      'http://127.0.0.1:19000',
     ];
   }
   if (raw === '*') {
